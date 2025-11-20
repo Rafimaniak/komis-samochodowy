@@ -7,7 +7,7 @@
 </head>
 <body>
 <div class="container mt-4">
-    <h1>🚗 Lista Samochodów</h1>
+    <h1>Lista Samochodów</h1>
     <a href="/" class="btn btn-secondary mb-3">← Powrót do strony głównej</a>
 
     <div class="table-responsive">
@@ -30,7 +30,7 @@
                 <td th:text="${samochod.marka}"></td>
                 <td th:text="${samochod.model}"></td>
                 <td th:text="${samochod.rokProdukcji}"></td>
-                <td th:text="${'₱' + samochod.cena}"></td>
+                <td th:text="${samochod.cena + ' zł'}"></td>
                 <td th:text="${samochod.kolor}"></td>
                 <td th:text="${samochod.przebieg + ' km'}"></td>
                 <td>

@@ -2,10 +2,10 @@ package pl.komis.model;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
-import java.util.List;
+import java.time.LocalDate;
 
 @Entity
-@Table(name = "samochod")
+@Table(name = "samochody")
 public class Samochod {
 
     @Id
@@ -15,15 +15,27 @@ public class Samochod {
     private String marka;
     private String model;
     private int rokProdukcji;
-    private BigDecimal cena;
-    private String kolor;
     private int przebieg;
 
-    // DODANE POLE STATUS
-    private String status; // np: "DOSTEPNY", "SPRZEDANY", "ZAREZERWOWANY"
+    @Column(name = "pojemnosc_silnika")
+    private Double pojemnoscSilnika;
 
-    @OneToMany(mappedBy = "samochod", cascade = CascadeType.ALL)
-    private List<Zakup> zakupy;
+    @Column(name = "rodzaj_paliwa")
+    private String rodzajPaliwa;
+
+    @Column(name = "skrzynia_biegow")
+    private String skrzyniaBiegow;
+
+    private String kolor;
+    private BigDecimal cena;
+    private String status;
+
+    @Column(name = "data_dodania")
+    private LocalDate dataDodania;
+
+    // DODANE: Pole na zdjęcie
+    @Column(name = "zdjecie_url")
+    private String zdjecieUrl;
 
     public Samochod() {}
 
@@ -60,12 +72,36 @@ public class Samochod {
         this.rokProdukcji = rokProdukcji;
     }
 
-    public BigDecimal getCena() {
-        return cena;
+    public int getPrzebieg() {
+        return przebieg;
     }
 
-    public void setCena(BigDecimal cena) {
-        this.cena = cena;
+    public void setPrzebieg(int przebieg) {
+        this.przebieg = przebieg;
+    }
+
+    public Double getPojemnoscSilnika() {
+        return pojemnoscSilnika;
+    }
+
+    public void setPojemnoscSilnika(Double pojemnoscSilnika) {
+        this.pojemnoscSilnika = pojemnoscSilnika;
+    }
+
+    public String getRodzajPaliwa() {
+        return rodzajPaliwa;
+    }
+
+    public void setRodzajPaliwa(String rodzajPaliwa) {
+        this.rodzajPaliwa = rodzajPaliwa;
+    }
+
+    public String getSkrzyniaBiegow() {
+        return skrzyniaBiegow;
+    }
+
+    public void setSkrzyniaBiegow(String skrzyniaBiegow) {
+        this.skrzyniaBiegow = skrzyniaBiegow;
     }
 
     public String getKolor() {
@@ -76,15 +112,14 @@ public class Samochod {
         this.kolor = kolor;
     }
 
-    public int getPrzebieg() {
-        return przebieg;
+    public BigDecimal getCena() {
+        return cena;
     }
 
-    public void setPrzebieg(int przebieg) {
-        this.przebieg = przebieg;
+    public void setCena(BigDecimal cena) {
+        this.cena = cena;
     }
 
-    // GETTER I SETTER DLA STATUS
     public String getStatus() {
         return status;
     }
@@ -93,11 +128,19 @@ public class Samochod {
         this.status = status;
     }
 
-    public List<Zakup> getZakupy() {
-        return zakupy;
+    public LocalDate getDataDodania() {
+        return dataDodania;
     }
 
-    public void setZakupy(List<Zakup> zakupy) {
-        this.zakupy = zakupy;
+    public void setDataDodania(LocalDate dataDodania) {
+        this.dataDodania = dataDodania;
+    }
+
+    public String getZdjecieUrl() {
+        return zdjecieUrl;
+    }
+
+    public void setZdjecieUrl(String zdjecieUrl) {
+        this.zdjecieUrl = zdjecieUrl;
     }
 }

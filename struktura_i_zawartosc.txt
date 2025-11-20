@@ -1,0 +1,2743 @@
+Eksport struktury katalog�w i plik�w
+Wygenerowano: 11/20/2025 04:07:09
+
+
+
+�CIE�KA: src\main\java\pl\komis\KomisApplication.java
+--------------------------------------------------------
+package pl.komis;
+
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+
+@SpringBootApplication
+public class KomisApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(KomisApplication.class, args);
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\config\DataLoader.java
+---------------------------------------------------------
+package pl.komis.config;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.stereotype.Component;
+import pl.komis.model.Samochod;
+import pl.komis.repository.SamochodRepository;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+@Component
+@RequiredArgsConstructor
+public class DataLoader implements CommandLineRunner {
+
+    private final SamochodRepository samochodRepository;
+
+    @Override
+    public void run(String... args) {
+        if (samochodRepository.count() == 0) {
+            // Dodaj samochody z wszystkimi wymaganymi polami
+            Samochod s1 = new Samochod();
+            s1.setMarka("BMW");
+            s1.setModel("Seria 3");
+            s1.setRokProdukcji(2020);
+            s1.setPrzebieg(50000);
+            s1.setPojemnoscSilnika(2.0);
+            s1.setRodzajPaliwa("Benzyna");
+            s1.setSkrzyniaBiegow("Automatyczna");
+            s1.setKolor("Czarny");
+            s1.setCena(new BigDecimal("120000"));
+            s1.setStatus("DOSTEPNY");
+            s1.setDataDodania(LocalDate.now());
+
+            Samochod s2 = new Samochod();
+            s2.setMarka("Audi");
+            s2.setModel("A4");
+            s2.setRokProdukcji(2019);
+            s2.setPrzebieg(60000);
+            s2.setPojemnoscSilnika(2.0);
+            s2.setRodzajPaliwa("Diesel");
+            s2.setSkrzyniaBiegow("Manualna");
+            s2.setKolor("Biały");
+            s2.setCena(new BigDecimal("95000"));
+            s2.setStatus("DOSTEPNY");
+            s2.setDataDodania(LocalDate.now());
+
+            samochodRepository.save(s1);
+            samochodRepository.save(s2);
+
+            System.out.println("Dodano samochody do bazy!");
+        }
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\config\SecurityConfig.java
+-------------------------------------------------------------
+package pl.komis.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/hello", "/samochody").permitAll()
+                        .requestMatchers("/samochody/nowy", "/samochody/edytuj/**", "/samochody/zapisz", "/samochody/usun/**").hasRole("ADMIN")
+                        .anyRequest().authenticated()
+                )
+                .formLogin(form -> form
+                        .loginPage("/login")
+                        .defaultSuccessUrl("/samochody", true)
+                        .permitAll()
+                )
+                .logout(logout -> logout
+                        .logoutRequestMatcher(new AntPathRequestMatcher("/logout"))
+                        .logoutSuccessUrl("/?logout=true")
+                        .invalidateHttpSession(true)
+                        .deleteCookies("JSESSIONID")
+                        .permitAll()
+                );
+
+        return http.build();
+    }
+
+    @Bean
+    public UserDetailsService userDetailsService() {
+        UserDetails user = User.builder()
+                .username("user")
+                .password(passwordEncoder().encode("user"))
+                .roles("USER")
+                .build();
+
+        UserDetails admin = User.builder()
+                .username("admin")
+                .password(passwordEncoder().encode("admin"))
+                .roles("ADMIN", "USER")
+                .build();
+
+        return new InMemoryUserDetailsManager(user, admin);
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\KlientPromocjaController.java
+---------------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import pl.komis.model.KlientPromocja;
+import pl.komis.service.KlientPromocjaService;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/klient-promocje")
+@RequiredArgsConstructor
+public class KlientPromocjaController {
+
+    private final KlientPromocjaService klientPromocjaService;
+
+    @GetMapping
+    public List<KlientPromocja> getAll() {
+        return klientPromocjaService.findAll();
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<KlientPromocja> getById(@PathVariable Long id) {
+        return ResponseEntity.ok(klientPromocjaService.findById(id));
+    }
+
+    @PostMapping("/assign/{idKlienta}/{idPromocji}")
+    public ResponseEntity<KlientPromocja> assign(@PathVariable Long idKlienta,
+                                                 @PathVariable Long idPromocji) {
+        return ResponseEntity.ok(
+                klientPromocjaService.assignPromotion(idKlienta, idPromocji)
+        );
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        klientPromocjaService.remove(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/by-klient/{idKlienta}")
+    public List<KlientPromocja> byKlient(@PathVariable Long idKlienta) {
+        return klientPromocjaService.findByKlientId(idKlienta);
+    }
+
+    @GetMapping("/by-promocja/{idPromocji}")
+    public List<KlientPromocja> byPromocja(@PathVariable Long idPromocji) {
+        return klientPromocjaService.findByPromocjaId(idPromocji);
+    }
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\controller\LoginController.java
+------------------------------------------------------------------
+package pl.komis.controller;
+
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+
+@Controller
+public class LoginController {
+
+    @GetMapping("/login")
+    public String login() {
+        return "login";
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\PromocjaController.java
+---------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import pl.komis.model.Promocja;
+import pl.komis.service.PromocjaService;
+
+import java.util.List;
+import java.util.NoSuchElementException;
+
+@RestController
+@RequestMapping("/api/promocje")
+@RequiredArgsConstructor
+public class PromocjaController {
+
+    private final PromocjaService promocjaService;
+
+    @GetMapping
+    public List<Promocja> getAll() {
+        return promocjaService.findAll();
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<Promocja> getById(@PathVariable Long id) {
+        try {
+            return ResponseEntity.ok(promocjaService.getById(id));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping
+    public ResponseEntity<Promocja> create(@RequestBody Promocja p) {
+        Promocja created = promocjaService.save(p);
+        return ResponseEntity.ok(created);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<Promocja> update(@PathVariable Long id, @RequestBody Promocja p) {
+        try {
+            Promocja updated = promocjaService.update(id, p);
+            return ResponseEntity.ok(updated);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        try {
+            promocjaService.remove(id);
+            return ResponseEntity.noContent().build();
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @GetMapping("/aktywne")
+    public List<Promocja> getActive() {
+        return promocjaService.findActive();
+    }
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\controller\SamochodController.java
+---------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.*;
+import pl.komis.model.Samochod;
+import pl.komis.service.SamochodService;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
+@Controller
+@RequestMapping("/samochody")
+@RequiredArgsConstructor
+public class SamochodController {
+
+    private final SamochodService samochodService;
+
+    // Widok listy samochodów - dostępne dla wszystkich
+    @GetMapping
+    public String listaSamochodow(Model model) {
+        List<Samochod> samochody = samochodService.findAll();
+        model.addAttribute("samochody", samochody);
+        model.addAttribute("tytul", "Lista Samochodów");
+        return "samochody/lista";
+    }
+
+    // Strona szczegółów samochodu - dostępne dla wszystkich
+    @GetMapping("/szczegoly")
+    public String szczegolySamochodu(@RequestParam("id") Long id, Model model) {
+        Samochod samochod = samochodService.findById(id)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+        model.addAttribute("samochod", samochod);
+        model.addAttribute("tytul", samochod.getMarka() + " " + samochod.getModel());
+        return "samochody/szczegoly";
+    }
+
+    // Formularz dodawania nowego samochodu - tylko ADMIN
+    @GetMapping("/nowy")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String formNowySamochod(Model model) {
+        model.addAttribute("samochod", new Samochod());
+        model.addAttribute("tytul", "Dodaj Nowy Samochód");
+        return "samochody/form";
+    }
+
+    // Zapisywanie nowego samochodu - tylko ADMIN
+    @PostMapping("/zapisz")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String zapiszSamochod(@ModelAttribute Samochod samochod) {
+        // Ustaw domyślne wartości dla brakujących pól
+        if (samochod.getDataDodania() == null) {
+            samochod.setDataDodania(LocalDate.now());
+        }
+        if (samochod.getRodzajPaliwa() == null) {
+            samochod.setRodzajPaliwa("Benzyna");
+        }
+        if (samochod.getSkrzyniaBiegow() == null) {
+            samochod.setSkrzyniaBiegow("Manualna");
+        }
+        if (samochod.getPojemnoscSilnika() == null) {
+            samochod.setPojemnoscSilnika(2.0);
+        }
+
+        samochodService.save(samochod);
+        return "redirect:/samochody";
+    }
+
+    // Formularz edycji samochodu - tylko ADMIN
+    @GetMapping("/edytuj")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String formEdycjaSamochodu(@RequestParam("id") Long id, Model model) {
+        Samochod samochod = samochodService.findById(id)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+        model.addAttribute("samochod", samochod);
+        model.addAttribute("tytul", "Edytuj Samochód");
+        return "samochody/form";
+    }
+
+    // Aktualizacja samochodu - tylko ADMIN
+    @PostMapping("/edytuj")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String aktualizujSamochod(@RequestParam("id") Long id, @ModelAttribute Samochod samochod) {
+        samochod.setId(id);
+        samochodService.save(samochod);
+        return "redirect:/samochody";
+    }
+
+    // Usuwanie samochodu - tylko ADMIN
+    @PostMapping("/usun")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String usunSamochod(@RequestParam("id") Long id) {
+        samochodService.delete(id);
+        return "redirect:/samochody";
+    }
+
+    // Rezerwacja samochodu - dla zalogowanych użytkowników
+    @PostMapping("/zarezerwuj")
+    @PreAuthorize("isAuthenticated()")
+    public String zarezerwujSamochod(@RequestParam("id") Long id) {
+        Samochod samochod = samochodService.findById(id)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+        if ("DOSTEPNY".equals(samochod.getStatus())) {
+            samochod.setStatus("ZAREZERWOWANY");
+            samochodService.save(samochod);
+        }
+
+        return "redirect:/samochody/szczegoly?id=" + id;
+    }
+
+    // Zakup samochodu - dla zalogowanych użytkowników
+    @PostMapping("/kup")
+    @PreAuthorize("isAuthenticated()")
+    public String kupSamochod(@RequestParam("id") Long id) {
+        Samochod samochod = samochodService.findById(id)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+        if ("DOSTEPNY".equals(samochod.getStatus()) || "ZAREZERWOWANY".equals(samochod.getStatus())) {
+            samochod.setStatus("SPRZEDANY");
+            samochodService.save(samochod);
+        }
+
+        return "redirect:/samochody/szczegoly?id=" + id;
+    }
+
+    // Anulowanie rezerwacji - dla zalogowanych użytkowników
+    @PostMapping("/anuluj-rezerwacje")
+    @PreAuthorize("isAuthenticated()")
+    public String anulujRezerwacje(@RequestParam("id") Long id) {
+        Samochod samochod = samochodService.findById(id)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+        if ("ZAREZERWOWANY".equals(samochod.getStatus())) {
+            samochod.setStatus("DOSTEPNY");
+            samochodService.save(samochod);
+        }
+
+        return "redirect:/samochody/szczegoly?id=" + id;
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\StronaController.java
+-------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import pl.komis.model.Samochod;
+import pl.komis.service.SamochodService;
+
+import java.util.List;
+
+@Controller
+@RequiredArgsConstructor
+public class StronaController {
+
+    private final SamochodService samochodService;
+
+    @GetMapping("/")
+    public String stronaGlowna(Model model) {
+        List<Samochod> samochody = samochodService.findAll();
+        model.addAttribute("samochody", samochody);
+        model.addAttribute("tytul", "Komis Samochodowy - Strona Główna");
+
+        // Sprawdź czy użytkownik jest zalogowany
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        boolean isAuthenticated = authentication != null &&
+                authentication.isAuthenticated() &&
+                !authentication.getName().equals("anonymousUser");
+        model.addAttribute("isAuthenticated", isAuthenticated);
+        model.addAttribute("username", authentication.getName());
+
+        return "index";
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\TestController.java
+-----------------------------------------------------------------
+package pl.komis.controller;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api")
+public class TestController {
+
+    @GetMapping("/hello")
+    public String hello() {
+        return "Komis Samochodowy API działa! 🚗";
+    }
+
+    @GetMapping("/test")
+    public String test() {
+        return "Test endpoint działa poprawnie!";
+    }
+
+    @GetMapping("/status")
+    public String status() {
+        return "Aplikacja jest uruchomiona - " + new java.util.Date();
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\model\Klient.java
+----------------------------------------------------
+package pl.komis.model;
+
+import jakarta.persistence.*;
+import java.util.List;
+
+@Entity
+public class Klient {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String imie;
+    private String nazwisko;
+    private String email;
+    private String telefon;
+
+    @OneToMany(mappedBy = "klient", cascade = CascadeType.ALL)
+    private List<Zakup> zakupy;
+
+    public Klient() {}
+
+    // --- Gettery i settery ---
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getImie() {
+        return imie;
+    }
+
+    public void setImie(String imie) {
+        this.imie = imie;
+    }
+
+    public String getNazwisko() {
+        return nazwisko;
+    }
+
+    public void setNazwisko(String nazwisko) {
+        this.nazwisko = nazwisko;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public String getTelefon() {
+        return telefon;
+    }
+
+    public void setTelefon(String telefon) {
+        this.telefon = telefon;
+    }
+
+    public List<Zakup> getZakupy() {
+        return zakupy;
+    }
+
+    public void setZakupy(List<Zakup> zakupy) {
+        this.zakupy = zakupy;
+    }
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\model\KlientPromocja.java
+------------------------------------------------------------
+package pl.komis.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDate;
+
+@Entity
+@Table(name = "klienci_promocje")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class KlientPromocja {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    // klient, który otrzymał promocję
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_klienta", nullable = false)
+    private Klient klient;
+
+    // promocja, która została przyznana
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_promocji", nullable = false)
+    private Promocja promocja;
+
+    private LocalDate dataPrzyznania;
+}
+
+
+�CIE�KA: src\main\java\pl\komis\model\Pracownik.java
+-------------------------------------------------------
+package pl.komis.model;
+
+
+import jakarta.persistence.*;
+import lombok.*;
+
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+
+
+@Entity
+@Table(name = "pracownicy")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Pracownik {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String imie;
+    private String nazwisko;
+    private String stanowisko;
+    private String telefon;
+    private String email;
+    private LocalDate dataZatrudnienia;
+
+    @OneToMany(mappedBy = "pracownik")
+    private List<Sprzedaz> sprzedaze = new ArrayList<>();
+
+    @OneToMany(mappedBy = "pracownik")
+    private List<Serwis> serwisy = new ArrayList<>();
+
+    @OneToMany(mappedBy = "pracownik")
+    private List<Zakup> zakupy = new ArrayList<>();
+}
+
+
+�CIE�KA: src\main\java\pl\komis\model\Promocja.java
+------------------------------------------------------
+package pl.komis.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+
+@Entity
+@Table(name = "promocje")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Promocja {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id; // ZMIANA: było idPromocji
+
+    @Column(nullable = false)
+    private String nazwa;
+
+    private String rodzaj;
+    private Double wartosc;
+
+    @Column(columnDefinition = "text")
+    private String opis;
+
+    private LocalDate dataRozpoczecia;
+    private LocalDate dataZakonczenia;
+    private Boolean aktywna;
+
+    // TYMCZASOWO ZAKOMENTUJ RELACJĘ
+    // @OneToMany(mappedBy = "promocja", cascade = CascadeType.ALL, orphanRemoval = true)
+    // private List<KlientPromocja> klientPromocje = new ArrayList<>();
+}
+
+
+�CIE�KA: src\main\java\pl\komis\model\Samochod.java
+------------------------------------------------------
+package pl.komis.model;
+
+import jakarta.persistence.*;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+@Entity
+@Table(name = "samochody")
+public class Samochod {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String marka;
+    private String model;
+    private int rokProdukcji;
+    private int przebieg;
+
+    @Column(name = "pojemnosc_silnika")
+    private Double pojemnoscSilnika;
+
+    @Column(name = "rodzaj_paliwa")
+    private String rodzajPaliwa;
+
+    @Column(name = "skrzynia_biegow")
+    private String skrzyniaBiegow;
+
+    private String kolor;
+    private BigDecimal cena;
+    private String status;
+
+    @Column(name = "data_dodania")
+    private LocalDate dataDodania;
+
+    // DODANE: Pole na zdjęcie
+    @Column(name = "zdjecie_url")
+    private String zdjecieUrl;
+
+    public Samochod() {}
+
+    // --- Gettery i settery ---
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getMarka() {
+        return marka;
+    }
+
+    public void setMarka(String marka) {
+        this.marka = marka;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    public int getRokProdukcji() {
+        return rokProdukcji;
+    }
+
+    public void setRokProdukcji(int rokProdukcji) {
+        this.rokProdukcji = rokProdukcji;
+    }
+
+    public int getPrzebieg() {
+        return przebieg;
+    }
+
+    public void setPrzebieg(int przebieg) {
+        this.przebieg = przebieg;
+    }
+
+    public Double getPojemnoscSilnika() {
+        return pojemnoscSilnika;
+    }
+
+    public void setPojemnoscSilnika(Double pojemnoscSilnika) {
+        this.pojemnoscSilnika = pojemnoscSilnika;
+    }
+
+    public String getRodzajPaliwa() {
+        return rodzajPaliwa;
+    }
+
+    public void setRodzajPaliwa(String rodzajPaliwa) {
+        this.rodzajPaliwa = rodzajPaliwa;
+    }
+
+    public String getSkrzyniaBiegow() {
+        return skrzyniaBiegow;
+    }
+
+    public void setSkrzyniaBiegow(String skrzyniaBiegow) {
+        this.skrzyniaBiegow = skrzyniaBiegow;
+    }
+
+    public String getKolor() {
+        return kolor;
+    }
+
+    public void setKolor(String kolor) {
+        this.kolor = kolor;
+    }
+
+    public BigDecimal getCena() {
+        return cena;
+    }
+
+    public void setCena(BigDecimal cena) {
+        this.cena = cena;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public LocalDate getDataDodania() {
+        return dataDodania;
+    }
+
+    public void setDataDodania(LocalDate dataDodania) {
+        this.dataDodania = dataDodania;
+    }
+
+    public String getZdjecieUrl() {
+        return zdjecieUrl;
+    }
+
+    public void setZdjecieUrl(String zdjecieUrl) {
+        this.zdjecieUrl = zdjecieUrl;
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\model\Serwis.java
+----------------------------------------------------
+package pl.komis.model;
+
+
+import jakarta.persistence.*;
+import lombok.*;
+
+
+import java.time.LocalDate;
+
+
+@Entity
+@Table(name = "serwis")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Serwis {
+
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_samochodu")
+    private Samochod samochod;
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_pracownika")
+    private Pracownik pracownik;
+
+
+    @Column(columnDefinition = "text")
+    private String opisUslugi;
+    private Double koszt;
+    private LocalDate dataSerwisu;
+}
+
+
+�CIE�KA: src\main\java\pl\komis\model\Sprzedaz.java
+------------------------------------------------------
+package pl.komis.model;
+
+
+import jakarta.persistence.*;
+import lombok.*;
+
+
+import java.time.LocalDate;
+
+
+@Entity
+@Table(name = "sprzedaze")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Sprzedaz {
+
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long idSprzedazy;
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_samochodu")
+    private Samochod samochod;
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_klienta")
+    private Klient klient;
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_pracownika")
+    private Pracownik pracownik;
+
+
+    private LocalDate dataSprzedazy;
+    private Double cenaSprzedazy;
+    private String formaPlatnosci; // enum
+}
+
+
+�CIE�KA: src\main\java\pl\komis\model\Zakup.java
+---------------------------------------------------
+package pl.komis.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDate;
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "zakupy")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Zakup {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_samochodu")
+    private Samochod samochod;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_klienta")
+    private Klient klient;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_pracownika")
+    private Pracownik pracownik;
+
+    private LocalDate dataZakupu;
+
+    @Column(precision = 12, scale = 2)
+    private BigDecimal cenaZakupu;
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\model\Zdjecie.java
+-----------------------------------------------------
+package pl.komis.model;
+
+
+import jakarta.persistence.*;
+import lombok.*;
+
+
+@Entity
+@Table(name = "zdjecia")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Zdjecie {
+
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+
+    private String url;
+    @Column(length = 1000)
+    private String opis;
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_samochodu")
+    private Samochod samochod;
+}
+
+
+�CIE�KA: src\main\java\pl\komis\repository\KlientPromocjaRepository.java
+---------------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import pl.komis.model.KlientPromocja;
+
+import java.util.List;
+
+public interface KlientPromocjaRepository extends JpaRepository<KlientPromocja, Long> {
+
+    @Query("SELECT kp FROM KlientPromocja kp WHERE kp.klient.id = :klientId")
+    List<KlientPromocja> findByKlientId(@Param("klientId") Long klientId);
+
+    @Query("SELECT kp FROM KlientPromocja kp WHERE kp.promocja.id = :promocjaId")
+    List<KlientPromocja> findByPromocjaId(@Param("promocjaId") Long promocjaId);
+}
+
+
+�CIE�KA: src\main\java\pl\komis\repository\KlientRepository.java
+-------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import pl.komis.model.Klient;
+
+import java.util.Optional;
+
+public interface KlientRepository extends JpaRepository<Klient, Long> {
+
+    Optional<Klient> findByEmail(String email);
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\repository\PracownikRepository.java
+----------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import pl.komis.model.Pracownik;
+
+import java.util.List;
+
+public interface PracownikRepository extends JpaRepository<Pracownik, Long> {
+
+    List<Pracownik> findByStanowiskoIgnoreCase(String stanowisko);
+
+    Pracownik findByEmail(String email);
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\repository\PromocjaRepository.java
+---------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import pl.komis.model.Promocja;
+
+import java.time.LocalDate;
+import java.util.List;
+
+public interface PromocjaRepository extends JpaRepository<Promocja, Long> {
+
+    List<Promocja> findByDataRozpoczeciaBeforeAndDataZakonczeniaAfter(LocalDate from, LocalDate to);
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\repository\SamochodRepository.java
+---------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import pl.komis.model.Samochod;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+public interface SamochodRepository extends JpaRepository<Samochod, Long> {
+
+    // Poprawione metody z @Query dla większej kontroli
+    @Query("SELECT s FROM Samochod s WHERE LOWER(s.marka) = LOWER(:marka)")
+    List<Samochod> findByMarkaIgnoreCase(@Param("marka") String marka);
+
+    @Query("SELECT s FROM Samochod s WHERE LOWER(s.model) = LOWER(:model)")
+    List<Samochod> findByModelIgnoreCase(@Param("model") String model);
+
+    @Query("SELECT s FROM Samochod s WHERE s.status = :status")
+    List<Samochod> findByStatus(@Param("status") String status);
+
+    @Query("SELECT s FROM Samochod s WHERE s.cena BETWEEN :minCena AND :maxCena")
+    List<Samochod> findByCenaBetween(@Param("minCena") BigDecimal minCena,
+                                     @Param("maxCena") BigDecimal maxCena);
+}
+
+
+�CIE�KA: src\main\java\pl\komis\repository\SerwisRepository.java
+-------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import pl.komis.model.Serwis;
+
+import java.time.LocalDate;
+import java.util.List;
+
+public interface SerwisRepository extends JpaRepository<Serwis, Long> {
+
+    List<Serwis> findByDataSerwisuBetween(LocalDate od, LocalDate do_);
+
+    // POPRAWIONE METODY Z @Query
+    @Query("SELECT s FROM Serwis s WHERE s.samochod.id = :samochodId")
+    List<Serwis> findBySamochodId(@Param("samochodId") Long samochodId);
+
+    @Query("SELECT s FROM Serwis s WHERE s.pracownik.id = :pracownikId")
+    List<Serwis> findByPracownikId(@Param("pracownikId") Long pracownikId);
+}
+
+
+�CIE�KA: src\main\java\pl\komis\repository\SprzedazRepository.java
+---------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import pl.komis.model.Sprzedaz;
+
+import java.time.LocalDate;
+import java.util.List;
+
+public interface SprzedazRepository extends JpaRepository<Sprzedaz, Long> {
+
+    // ZAKOMENTUJ WSZYSTKIE METODY
+    // List<Sprzedaz> findByDataSprzedazyBetween(LocalDate od, LocalDate do_);
+    // List<Sprzedaz> findByPracownikIdPracownika(Long idPracownika);
+    // List<Sprzedaz> findByKlientIdKlienta(Long idKlienta);
+    // List<Sprzedaz> findBySamochodIdSamochodu(Long idSamochodu);
+}
+
+
+�CIE�KA: src\main\java\pl\komis\repository\ZakupRepository.java
+------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import pl.komis.model.Zakup;
+
+import java.time.LocalDate;
+import java.util.List;
+
+public interface ZakupRepository extends JpaRepository<Zakup, Long> {
+
+    List<Zakup> findByDataZakupuBetween(LocalDate od, LocalDate do_);
+
+    // POPRAWIONE METODY Z @Query
+    @Query("SELECT z FROM Zakup z WHERE z.klient.id = :klientId")
+    List<Zakup> findByKlientId(@Param("klientId") Long klientId);
+
+    @Query("SELECT z FROM Zakup z WHERE z.pracownik.id = :pracownikId")
+    List<Zakup> findByPracownikId(@Param("pracownikId") Long pracownikId);
+}
+
+
+�CIE�KA: src\main\java\pl\komis\repository\ZdjecieRepository.java
+--------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import pl.komis.model.Zdjecie;
+
+import java.util.List;
+
+public interface ZdjecieRepository extends JpaRepository<Zdjecie, Long> {
+
+    @Query("SELECT z FROM Zdjecie z WHERE z.samochod.id = :samochodId")
+    List<Zdjecie> findBySamochodId(@Param("samochodId") Long samochodId);
+}
+
+
+�CIE�KA: src\main\java\pl\komis\service\KlientPromocjaService.java
+---------------------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import pl.komis.model.Klient;
+import pl.komis.model.KlientPromocja;
+import pl.komis.model.Promocja;
+import pl.komis.repository.KlientPromocjaRepository;
+import pl.komis.repository.KlientRepository;
+import pl.komis.repository.PromocjaRepository;
+
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class KlientPromocjaService {
+
+    private final KlientPromocjaRepository klientPromocjaRepository;
+    private final KlientRepository klientRepository;
+    private final PromocjaRepository promocjaRepository;
+
+    public List<KlientPromocja> findAll() {
+        return klientPromocjaRepository.findAll();
+    }
+
+    public KlientPromocja findById(Long id) {
+        return klientPromocjaRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Nie znaleziono przypisania promocji o id=" + id));
+    }
+
+    public List<KlientPromocja> findByKlientId(Long klientId) {
+        return klientPromocjaRepository.findByKlientId(klientId);
+    }
+
+    public List<KlientPromocja> findByPromocjaId(Long promocjaId) {
+        return klientPromocjaRepository.findByPromocjaId(promocjaId);
+    }
+
+    // ============================
+    //    NAJWAŻNIEJSZE METODY
+    // ============================
+
+    public KlientPromocja assignPromotion(Long idKlienta, Long idPromocji) {
+
+        Klient klient = klientRepository.findById(idKlienta)
+                .orElseThrow(() -> new RuntimeException("Klient nie istnieje: " + idKlienta));
+
+        Promocja promocja = promocjaRepository.findById(idPromocji)
+                .orElseThrow(() -> new RuntimeException("Promocja nie istnieje: " + idPromocji));
+
+        // tworzymy przypisanie
+        KlientPromocja kp = new KlientPromocja();
+        kp.setKlient(klient);
+        kp.setPromocja(promocja);
+
+        return klientPromocjaRepository.save(kp);
+    }
+
+    public void remove(Long id) {
+        if (!klientPromocjaRepository.existsById(id)) {
+            throw new RuntimeException("Nie znaleziono przypisania do usunięcia: " + id);
+        }
+        klientPromocjaRepository.deleteById(id);
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\service\KlientService.java
+-------------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import pl.komis.model.Klient;
+import pl.komis.repository.KlientRepository;
+
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class KlientService {
+
+    private final KlientRepository klientRepository;
+
+    public List<Klient> findAll() {
+        return klientRepository.findAll();
+    }
+
+    public Klient getById(Long id) {
+        return klientRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Klient o id " + id + " nie istnieje."));
+    }
+
+    public Klient save(Klient klient) {
+        return klientRepository.save(klient);
+    }
+
+    public void remove(Long id) {
+        if (!klientRepository.existsById(id)) {
+            throw new NoSuchElementException("Nie można usunąć — klient o id " + id + " nie istnieje.");
+        }
+        klientRepository.deleteById(id);
+    }
+
+    public Optional<Klient> findByEmail(String email) {
+        return klientRepository.findByEmail(email);
+    }
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\service\PromocjaService.java
+---------------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import pl.komis.model.Promocja;
+import pl.komis.repository.PromocjaRepository;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.NoSuchElementException;
+
+@Service
+@RequiredArgsConstructor
+public class PromocjaService {
+
+    private final PromocjaRepository promocjaRepository;
+
+    public List<Promocja> findAll() {
+        return promocjaRepository.findAll();
+    }
+
+    public Promocja getById(Long id) {
+        return promocjaRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Promocja o id " + id + " nie istnieje."));
+    }
+
+    public Promocja save(Promocja promocja) {
+        return promocjaRepository.save(promocja);
+    }
+
+    public Promocja update(Long id, Promocja data) {
+        Promocja p = getById(id);
+
+        p.setNazwa(data.getNazwa());
+        p.setRodzaj(data.getRodzaj());
+        p.setWartosc(data.getWartosc());
+        p.setOpis(data.getOpis());
+        p.setDataRozpoczecia(data.getDataRozpoczecia());
+        p.setDataZakonczenia(data.getDataZakonczenia());
+        p.setAktywna(data.getAktywna());
+
+        return promocjaRepository.save(p);
+    }
+
+    public void remove(Long id) {
+        if (!promocjaRepository.existsById(id)) {
+            throw new NoSuchElementException("Promocja o id " + id + " nie istnieje.");
+        }
+        promocjaRepository.deleteById(id);
+    }
+
+    public List<Promocja> findActive() {
+        LocalDate today = LocalDate.now();
+        return promocjaRepository.findByDataRozpoczeciaBeforeAndDataZakonczeniaAfter(today, today);
+    }
+}
+
+
+
+�CIE�KA: src\main\java\pl\komis\service\SamochodService.java
+---------------------------------------------------------------
+package pl.komis.service;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import pl.komis.model.Samochod;
+import pl.komis.repository.SamochodRepository;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Optional;
+
+@Service
+public class SamochodService {
+
+    private final SamochodRepository samochodRepository;
+
+    public SamochodService(SamochodRepository samochodRepository) {
+        this.samochodRepository = samochodRepository;
+    }
+
+    public List<Samochod> findAll() {
+        return samochodRepository.findAll();
+    }
+
+    public Optional<Samochod> findById(Long id) {
+        return samochodRepository.findById(id);
+    }
+
+    public Samochod save(Samochod samochod) {
+        return samochodRepository.save(samochod);
+    }
+
+    public void delete(Long id) {
+        samochodRepository.deleteById(id);
+    }
+
+    public List<Samochod> findByMarka(String marka) {
+        return samochodRepository.findByMarkaIgnoreCase(marka);
+    }
+
+    public List<Samochod> findByModel(String model) {
+        return samochodRepository.findByModelIgnoreCase(model);
+    }
+
+    public List<Samochod> findByStatus(String status) {
+        return samochodRepository.findByStatus(status);
+    }
+
+    public List<Samochod> findByCenaBetween(BigDecimal min, BigDecimal max) {
+        return samochodRepository.findByCenaBetween(min, max);
+    }
+
+    public List<Samochod> findByCenaBetween(double min, double max) {
+        BigDecimal minCena = BigDecimal.valueOf(min);
+        BigDecimal maxCena = BigDecimal.valueOf(max);
+        return samochodRepository.findByCenaBetween(minCena, maxCena);
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\service\ZakupService.java
+------------------------------------------------------------
+package pl.komis.service;
+
+import pl.komis.model.Zakup;
+import pl.komis.model.Samochod;
+import pl.komis.model.Klient;
+import pl.komis.repository.ZakupRepository;
+import pl.komis.repository.SamochodRepository;
+import pl.komis.repository.KlientRepository;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.NoSuchElementException;
+
+@Service
+public class ZakupService {
+
+    private final ZakupRepository zakupRepository;
+    private final SamochodRepository samochodRepository;
+    private final KlientRepository klientRepository;
+
+    public ZakupService(ZakupRepository zakupRepository,
+                        SamochodRepository samochodRepository,
+                        KlientRepository klientRepository) {
+        this.zakupRepository = zakupRepository;
+        this.samochodRepository = samochodRepository;
+        this.klientRepository = klientRepository;
+    }
+
+    // --- Odczyt wszystkich zakupów ---
+    public List<Zakup> getAllZakupy() {
+        return zakupRepository.findAll();
+    }
+
+    // --- Odczyt pojedynczego zakupu ---
+    public Zakup getZakupById(Long id) {
+        return zakupRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Nie znaleziono zakupu o ID: " + id));
+    }
+
+    // --- Dodawanie nowego zakupu ---
+    public Zakup addZakup(Zakup zakup) {
+        // Walidacja klienta
+        if (zakup.getKlient() == null || zakup.getKlient().getId() == null) {
+            throw new IllegalArgumentException("Zakup musi zawierać poprawnego klienta.");
+        }
+        Klient klient = klientRepository.findById(zakup.getKlient().getId())
+                .orElseThrow(() -> new NoSuchElementException("Nie znaleziono klienta o ID: " + zakup.getKlient().getId()));
+
+        // Walidacja samochodu
+        if (zakup.getSamochod() == null || zakup.getSamochod().getId() == null) {
+            throw new IllegalArgumentException("Zakup musi zawierać poprawny samochód.");
+        }
+        Samochod samochod = samochodRepository.findById(zakup.getSamochod().getId())
+                .orElseThrow(() -> new NoSuchElementException("Nie znaleziono samochodu o ID: " + zakup.getSamochod().getId()));
+
+        // Możemy np. ustawić domyślną cenę z samochodu, jeśli nie podano
+        if (zakup.getCenaZakupu() == null) {
+            zakup.setCenaZakupu(samochod.getCena());
+        }
+
+        zakup.setKlient(klient);
+        zakup.setSamochod(samochod);
+
+        return zakupRepository.save(zakup);
+    }
+
+    // --- Aktualizacja istniejącego zakupu ---
+    public Zakup updateZakup(Long id, Zakup updatedZakup) {
+        Zakup istniejący = zakupRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Nie znaleziono zakupu o ID: " + id));
+
+        if (updatedZakup.getDataZakupu() != null) {
+            istniejący.setDataZakupu(updatedZakup.getDataZakupu());
+        }
+        if (updatedZakup.getCenaZakupu() != null) {
+            istniejący.setCenaZakupu(updatedZakup.getCenaZakupu());
+        }
+        if (updatedZakup.getKlient() != null) {
+            Klient klient = klientRepository.findById(updatedZakup.getKlient().getId())
+                    .orElseThrow(() -> new NoSuchElementException("Nie znaleziono klienta o ID: " + updatedZakup.getKlient().getId()));
+            istniejący.setKlient(klient);
+        }
+        if (updatedZakup.getSamochod() != null) {
+            Samochod samochod = samochodRepository.findById(updatedZakup.getSamochod().getId())
+                    .orElseThrow(() -> new NoSuchElementException("Nie znaleziono samochodu o ID: " + updatedZakup.getSamochod().getId()));
+            istniejący.setSamochod(samochod);
+        }
+
+        return zakupRepository.save(istniejący);
+    }
+
+    // --- Usuwanie zakupu ---
+    public void deleteZakup(Long id) {
+        if (!zakupRepository.existsById(id)) {
+            throw new NoSuchElementException("Nie znaleziono zakupu o ID: " + id);
+        }
+        zakupRepository.deleteById(id);
+    }
+}
+
+
+
+�CIE�KA: src\main\resources\application.yml
+----------------------------------------------
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/komis
+    username: postgres
+    password: student
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+server:
+  port: 8080
+
+
+�CIE�KA: src\main\resources\templates\error.html
+---------------------------------------------------
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Błąd</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container mt-4">
+    <h1>Wystąpił błąd</h1>
+    <p>Przepraszamy, wystąpił problem z aplikacją.</p>
+    <a href="/" class="btn btn-primary">Powrót do strony głównej</a>
+</div>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\index.html
+---------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Komis Samochodowy</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .car-card-image {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 5px 5px 0 0;
+        }
+        .no-card-image {
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 3rem;
+            border-radius: 5px 5px 0 0;
+        }
+        .car-card {
+            transition: transform 0.2s ease-in-out;
+            height: 100%;
+        }
+        .car-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .status-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <div sec:authorize="isAuthenticated()">
+                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+            <div sec:authorize="!isAuthenticated()">
+                <a class="nav-link" href="/login">Zaloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <!-- Komunikat o wylogowaniu -->
+    <div th:if="${param.logout}" class="alert alert-success alert-dismissible fade show" role="alert">
+        Zostałeś pomyślnie wylogowany!
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+
+    <div class="row align-items-center mb-5">
+        <div class="col-md-8">
+            <h1>🚗 Komis Samochodowy</h1>
+            <p class="lead mb-0">Witamy w naszym komisie! Przeglądaj naszą ofertę samochodów z pełnymi szczegółami technicznymi.</p>
+        </div>
+        <div class="col-md-4 text-end">
+            <a th:href="@{/samochody}" class="btn btn-primary btn-lg">
+                <i class="fas fa-car"></i> Zobacz wszystkie samochody
+            </a>
+        </div>
+    </div>
+
+    <div class="row mb-5">
+        <div class="col-12">
+            <div class="card bg-light">
+                <div class="card-body text-center">
+                    <h3 class="card-title">🏆 Najlepsze oferty w mieście!</h3>
+                    <p class="card-text mb-0">
+                        Sprawdź naszą aktualną ofertę. Każdy samochód przeszedł szczegółową kontrolę techniczną.<br>
+                        <strong>Zaloguj się, aby zobaczyć pełne szczegóły i zarezerwować wybrany model.</strong>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h2 class="mb-4 text-center">🚀 Ostatnio dodane</h2>
+    <div class="row">
+        <div th:each="samochod : ${samochody}" class="col-lg-4 col-md-6 mb-4">
+            <div class="card car-card h-100">
+                <!-- Zdjęcie samochodu -->
+                <div class="position-relative">
+                    <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
+                        <img th:src="${samochod.zdjecieUrl}"
+                             th:alt="${samochod.marka + ' ' + samochod.model}"
+                             class="car-card-image">
+                    </div>
+                    <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-card-image">
+                        <i class="fas fa-car"></i>
+                    </div>
+
+                    <!-- Status badge -->
+                    <span th:if="${samochod.status == 'DOSTEPNY'}"
+                          class="badge bg-success status-badge" th:text="${samochod.status}"></span>
+                    <span th:if="${samochod.status == 'SPRZEDANY'}"
+                          class="badge bg-danger status-badge" th:text="${samochod.status}"></span>
+                    <span th:if="${samochod.status == 'ZAREZERWOWANY'}"
+                          class="badge bg-warning status-badge" th:text="${samochod.status}"></span>
+                </div>
+
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title" th:text="${samochod.marka + ' ' + samochod.model}"></h5>
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <small class="text-muted">Rok:</small><br>
+                            <strong th:text="${samochod.rokProdukcji}"></strong>
+                        </div>
+                        <div class="col-6">
+                            <small class="text-muted">Przebieg:</small><br>
+                            <strong th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></strong>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <small class="text-muted">Paliwo:</small><br>
+                            <strong th:text="${samochod.rodzajPaliwa}"></strong>
+                        </div>
+                    </div>
+
+                    <div class="mt-auto">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="h4 text-success mb-0"
+                                      th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                        </div>
+
+                        <!-- Przyciski akcji -->
+                        <div sec:authorize="isAuthenticated()" class="d-grid">
+                            <a th:href="@{/samochody/szczegoly(id=${samochod.id})}"
+                               class="btn btn-outline-primary">
+                                <i class="fas fa-search"></i> Zobacz szczegóły
+                            </a>
+                        </div>
+
+                        <div sec:authorize="!isAuthenticated()" class="d-grid">
+                            <button class="btn btn-outline-primary"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#loginInfoModal">
+                                <i class="fas fa-info-circle"></i> Zobacz szczegóły
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div th:if="${samochody.empty}" class="alert alert-info text-center">
+        <i class="fas fa-info-circle fa-2x mb-3"></i><br>
+        Brak samochodów w ofercie. Sprawdź później!
+    </div>
+
+    <!-- Informacja o konieczności logowania -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card border-warning">
+                <div class="card-body text-center">
+                    <h4 class="text-warning"><i class="fas fa-exclamation-triangle"></i> Ważna informacja</h4>
+                    <p class="mb-0">
+                        Aby zobaczyć pełne szczegóły techniczne, zdjęcia w wysokiej rozdzielczości
+                        oraz móc rezerwować i kupować samochody, <strong>musisz się zalogować</strong>.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal z informacją o konieczności logowania -->
+<div class="modal fade" id="loginInfoModal" tabindex="-1" aria-labelledby="loginInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="loginInfoModalLabel">
+                    <i class="fas fa-info-circle text-primary"></i> Informacja
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Aby zobaczyć pełne szczegóły tego samochodu, musisz się zalogować.</p>
+                <div class="alert alert-info">
+                    <strong>Po zalogowaniu będziesz mógł:</strong>
+                    <ul class="mb-0 mt-2">
+                        <li>Zobaczyć wszystkie parametry techniczne</li>
+                        <li>Obejrzeć zdjęcia w wysokiej rozdzielczości</li>
+                        <li>Zarezerwować wybrany samochód</li>
+                        <li>Skontaktować się w sprawie zakupu</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Później</button>
+                <a href="/login" class="btn btn-primary">
+                    <i class="fas fa-sign-in-alt"></i> Przejdź do logowania
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\login.html
+---------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Logowanie - Komis Samochodowy</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="login-container">
+        <h2 class="text-center mb-4">🚗 Logowanie</h2>
+
+        <div th:if="${param.error}" class="alert alert-danger">
+            Nieprawidłowa nazwa użytkownika lub hasło!
+        </div>
+
+        <div th:if="${param.logout}" class="alert alert-success">
+            Zostałeś wylogowany pomyślnie!
+        </div>
+
+        <form th:action="@{/login}" method="post">
+            <div class="mb-3">
+                <label for="username" class="form-label">Nazwa użytkownika:</label>
+                <input type="text" class="form-control" id="username" name="username" required>
+            </div>
+
+            <div class="mb-3">
+                <label for="password" class="form-label">Hasło:</label>
+                <input type="password" class="form-control" id="password" name="password" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100">Zaloguj się</button>
+        </form>
+
+        <div class="mt-3 text-center">
+            <small>Dane testowe:<br>
+                <strong>user/user</strong> - podstawowy dostęp<br>
+                <strong>admin/admin</strong> - pełny dostęp
+            </small>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\samochody.html
+-------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Lista Samochodów - Komis</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container mt-4">
+    <h1>Lista Samochodów</h1>
+    <a href="/" class="btn btn-secondary mb-3">← Powrót do strony głównej</a>
+
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th>Marka</th>
+                <th>Model</th>
+                <th>Rok</th>
+                <th>Cena</th>
+                <th>Kolor</th>
+                <th>Przebieg</th>
+                <th>Status</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="samochod : ${samochody}">
+                <td th:text="${samochod.id}"></td>
+                <td th:text="${samochod.marka}"></td>
+                <td th:text="${samochod.model}"></td>
+                <td th:text="${samochod.rokProdukcji}"></td>
+                <td th:text="${samochod.cena + ' zł'}"></td>
+                <td th:text="${samochod.kolor}"></td>
+                <td th:text="${samochod.przebieg + ' km'}"></td>
+                <td>
+                            <span th:if="${samochod.status == 'DOSTEPNY'}"
+                                  class="badge bg-success" th:text="${samochod.status}"></span>
+                    <span th:if="${samochod.status == 'SPRZEDANY'}"
+                          class="badge bg-danger" th:text="${samochod.status}"></span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\fragments\samochod-form-fields.html
+----------------------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="form-fields">
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label for="marka" class="form-label">Marka *</label>
+            <input type="text" class="form-control" id="marka"
+                   th:field="*{marka}" required>
+        </div>
+
+        <div class="col-md-6 mb-3">
+            <label for="model" class="form-label">Model *</label>
+            <input type="text" class="form-control" id="model"
+                   th:field="*{model}" required>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <label for="rokProdukcji" class="form-label">Rok Produkcji *</label>
+            <input type="number" class="form-control" id="rokProdukcji"
+                   th:field="*{rokProdukcji}" min="1990" max="2025" required>
+        </div>
+
+        <div class="col-md-4 mb-3">
+            <label for="przebieg" class="form-label">Przebieg (km) *</label>
+            <input type="number" class="form-control" id="przebieg"
+                   th:field="*{przebieg}" min="0" required>
+        </div>
+
+        <div class="col-md-4 mb-3">
+            <label for="cena" class="form-label">Cena (PLN) *</label>
+            <input type="number" step="0.01" class="form-control" id="cena"
+                   th:field="*{cena}" min="0" required>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <label for="kolor" class="form-label">Kolor</label>
+            <input type="text" class="form-control" id="kolor"
+                   th:field="*{kolor}">
+        </div>
+
+        <div class="col-md-4 mb-3">
+            <label for="pojemnoscSilnika" class="form-label">Pojemność silnika</label>
+            <input type="number" step="0.1" class="form-control" id="pojemnoscSilnika"
+                   th:field="*{pojemnoscSilnika}">
+        </div>
+
+        <div class="col-md-4 mb-3">
+            <label for="status" class="form-label">Status *</label>
+            <select class="form-select" id="status" th:field="*{status}" required>
+                <option value="">Wybierz status</option>
+                <option value="DOSTEPNY">Dostępny</option>
+                <option value="SPRZEDANY">Sprzedany</option>
+                <option value="ZAREZERWOWANY">Zarezerwowany</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label for="rodzajPaliwa" class="form-label">Rodzaj paliwa</label>
+            <select class="form-select" id="rodzajPaliwa" th:field="*{rodzajPaliwa}">
+                <option value="Benzyna">Benzyna</option>
+                <option value="Diesel">Diesel</option>
+                <option value="Hybryda">Hybryda</option>
+                <option value="Elektryczny">Elektryczny</option>
+            </select>
+        </div>
+
+        <div class="col-md-6 mb-3">
+            <label for="skrzyniaBiegow" class="form-label">Skrzynia biegów</label>
+            <select class="form-select" id="skrzyniaBiegow" th:field="*{skrzyniaBiegow}">
+                <option value="Manualna">Manualna</option>
+                <option value="Automatyczna">Automatyczna</option>
+            </select>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\samochody\form.html
+------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Formularz Samochodu</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <span class="navbar-text me-3" sec:authentication="name"></span>
+            <a class="nav-link" href="/samochody">Powrót do listy</a>
+            <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <div class="card">
+                <div class="card-header">
+                    <h4 th:text="${tytul}" class="mb-0">Formularz Samochodu</h4>
+                </div>
+                <div class="card-body">
+                    <!-- Formularz dla nowego samochodu -->
+                    <form th:if="${samochod.id == null}" th:action="@{/samochody/zapisz}"
+                          method="post" th:object="${samochod}">
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="marka" class="form-label">Marka *</label>
+                                <input type="text" class="form-control" id="marka"
+                                       th:field="*{marka}" required>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="model" class="form-label">Model *</label>
+                                <input type="text" class="form-control" id="model"
+                                       th:field="*{model}" required>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label for="rokProdukcji" class="form-label">Rok Produkcji *</label>
+                                <input type="number" class="form-control" id="rokProdukcji"
+                                       th:field="*{rokProdukcji}" min="1990" max="2025" required>
+                            </div>
+
+                            <div class="col-md-4 mb-3">
+                                <label for="przebieg" class="form-label">Przebieg (km) *</label>
+                                <input type="number" class="form-control" id="przebieg"
+                                       th:field="*{przebieg}" min="0" required>
+                            </div>
+
+                            <div class="col-md-4 mb-3">
+                                <label for="cena" class="form-label">Cena (zł) *</label>
+                                <div class="input-group">
+                                    <input type="number" step="0.01" class="form-control" id="cena"
+                                           th:field="*{cena}" min="0" required>
+                                    <span class="input-group-text">zł</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label for="kolor" class="form-label">Kolor</label>
+                                <input type="text" class="form-control" id="kolor"
+                                       th:field="*{kolor}">
+                            </div>
+
+                            <div class="col-md-4 mb-3">
+                                <label for="pojemnoscSilnika" class="form-label">Pojemność silnika</label>
+                                <div class="input-group">
+                                    <input type="number" step="0.1" class="form-control" id="pojemnoscSilnika"
+                                           th:field="*{pojemnoscSilnika}">
+                                    <span class="input-group-text">L</span>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4 mb-3">
+                                <label for="status" class="form-label">Status *</label>
+                                <select class="form-select" id="status" th:field="*{status}" required>
+                                    <option value="">Wybierz status</option>
+                                    <option value="DOSTEPNY">Dostępny</option>
+                                    <option value="SPRZEDANY">Sprzedany</option>
+                                    <option value="ZAREZERWOWANY">Zarezerwowany</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="rodzajPaliwa" class="form-label">Rodzaj paliwa</label>
+                                <select class="form-select" id="rodzajPaliwa" th:field="*{rodzajPaliwa}">
+                                    <option value="Benzyna">Benzyna</option>
+                                    <option value="Diesel">Diesel</option>
+                                    <option value="Hybryda">Hybryda</option>
+                                    <option value="Elektryczny">Elektryczny</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="skrzyniaBiegow" class="form-label">Skrzynia biegów</label>
+                                <select class="form-select" id="skrzyniaBiegow" th:field="*{skrzyniaBiegow}">
+                                    <option value="Manualna">Manualna</option>
+                                    <option value="Automatyczna">Automatyczna</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- DODANE: Pole na URL zdjęcia -->
+                        <div class="row">
+                            <div class="col-md-12 mb-3">
+                                <label for="zdjecieUrl" class="form-label">URL zdjęcia</label>
+                                <input type="url" class="form-control" id="zdjecieUrl"
+                                       th:field="*{zdjecieUrl}" placeholder="https://example.com/obrazek.jpg">
+                                <div class="form-text">
+                                    Wklej link do zdjęcia samochodu (opcjonalne)
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="/samochody" class="btn btn-secondary me-md-2">Anuluj</a>
+                            <button type="submit" class="btn btn-primary">Zapisz</button>
+                        </div>
+                    </form>
+
+                    <!-- Formularz dla edycji samochodu -->
+                    <form th:if="${samochod.id != null}" th:action="@{/samochody/edytuj(id=${samochod.id})}"
+                          method="post" th:object="${samochod}">
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="marka" class="form-label">Marka *</label>
+                                <input type="text" class="form-control" id="marka"
+                                       th:field="*{marka}" required>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="model" class="form-label">Model *</label>
+                                <input type="text" class="form-control" id="model"
+                                       th:field="*{model}" required>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label for="rokProdukcji" class="form-label">Rok Produkcji *</label>
+                                <input type="number" class="form-control" id="rokProdukcji"
+                                       th:field="*{rokProdukcji}" min="1990" max="2025" required>
+                            </div>
+
+                            <div class="col-md-4 mb-3">
+                                <label for="przebieg" class="form-label">Przebieg (km) *</label>
+                                <input type="number" class="form-control" id="przebieg"
+                                       th:field="*{przebieg}" min="0" required>
+                            </div>
+
+                            <div class="col-md-4 mb-3">
+                                <label for="cena" class="form-label">Cena (zł) *</label>
+                                <div class="input-group">
+                                    <input type="number" step="0.01" class="form-control" id="cena"
+                                           th:field="*{cena}" min="0" required>
+                                    <span class="input-group-text">zł</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label for="kolor" class="form-label">Kolor</label>
+                                <input type="text" class="form-control" id="kolor"
+                                       th:field="*{kolor}">
+                            </div>
+
+                            <div class="col-md-4 mb-3">
+                                <label for="pojemnoscSilnika" class="form-label">Pojemność silnika</label>
+                                <div class="input-group">
+                                    <input type="number" step="0.1" class="form-control" id="pojemnoscSilnika"
+                                           th:field="*{pojemnoscSilnika}">
+                                    <span class="input-group-text">L</span>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4 mb-3">
+                                <label for="status" class="form-label">Status *</label>
+                                <select class="form-select" id="status" th:field="*{status}" required>
+                                    <option value="">Wybierz status</option>
+                                    <option value="DOSTEPNY">Dostępny</option>
+                                    <option value="SPRZEDANY">Sprzedany</option>
+                                    <option value="ZAREZERWOWANY">Zarezerwowany</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="rodzajPaliwa" class="form-label">Rodzaj paliwa</label>
+                                <select class="form-select" id="rodzajPaliwa" th:field="*{rodzajPaliwa}">
+                                    <option value="Benzyna">Benzyna</option>
+                                    <option value="Diesel">Diesel</option>
+                                    <option value="Hybryda">Hybryda</option>
+                                    <option value="Elektryczny">Elektryczny</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="skrzyniaBiegow" class="form-label">Skrzynia biegów</label>
+                                <select class="form-select" id="skrzyniaBiegow" th:field="*{skrzyniaBiegow}">
+                                    <option value="Manualna">Manualna</option>
+                                    <option value="Automatyczna">Automatyczna</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- DODANE: Pole na URL zdjęcia -->
+                        <div class="row">
+                            <div class="col-md-12 mb-3">
+                                <label for="zdjecieUrl" class="form-label">URL zdjęcia</label>
+                                <input type="url" class="form-control" id="zdjecieUrl"
+                                       th:field="*{zdjecieUrl}" placeholder="https://example.com/obrazek.jpg">
+                                <div class="form-text">
+                                    Wklej link do zdjęcia samochodu (opcjonalne)
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="/samochody" class="btn btn-secondary me-md-2">Anuluj</a>
+                            <button type="submit" class="btn btn-primary">Zaktualizuj</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\samochody\lista.html
+-------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <title>Lista Samochodów - Komis</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .car-image {
+            width: 100px;
+            height: 75px;
+            object-fit: cover;
+            border-radius: 5px;
+        }
+        .no-image {
+            width: 100px;
+            height: 75px;
+            background-color: #f8f9fa;
+            border: 1px dashed #dee2e6;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+        }
+        .table-hover tbody tr:hover {
+            background-color: rgba(0, 0, 0, 0.03);
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <div sec:authorize="isAuthenticated()">
+                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+            <div sec:authorize="!isAuthenticated()">
+                <a class="nav-link" href="/login">Zaloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>🚗 Lista Samochodów</h1>
+        <div>
+            <a href="/" class="btn btn-secondary">
+                <i class="fas fa-home"></i> Strona Główna
+            </a>
+            <!-- Przycisk dodawania tylko dla admina -->
+            <a sec:authorize="hasRole('ADMIN')" href="/samochody/nowy" class="btn btn-success ms-2">
+                <i class="fas fa-plus"></i> Dodaj Samochód
+            </a>
+        </div>
+    </div>
+
+    <!-- Informacja o konieczności logowania -->
+    <div sec:authorize="!isAuthenticated()" class="alert alert-info mb-4">
+        <div class="d-flex align-items-center">
+            <i class="fas fa-info-circle fa-2x me-3"></i>
+            <div>
+                <strong>Aby zobaczyć pełne szczegóły samochodów i móc je rezerwować, musisz się zalogować.</strong><br>
+                Po zalogowaniu uzyskasz dostęp do wszystkich parametrów technicznych, zdjęć w wysokiej rozdzielczości oraz możliwość rezerwacji.
+            </div>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+            <tr>
+                <th>Zdjęcie</th>
+                <th>Marka</th>
+                <th>Model</th>
+                <th>Rok</th>
+                <th>Cena</th>
+                <th>Kolor</th>
+                <th>Przebieg</th>
+                <th>Status</th>
+                <th>Akcje</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="samochod : ${samochody}">
+                <td>
+                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" style="text-decoration: none;">
+                        <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
+                            <img th:src="${samochod.zdjecieUrl}" alt="Zdjęcie samochodu" class="car-image">
+                        </div>
+                        <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image">
+                            <i class="fas fa-car"></i>
+                        </div>
+                    </a>
+                </td>
+                <td>
+                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="text-dark fw-bold" style="text-decoration: none;">
+                        <span th:text="${samochod.marka}"></span>
+                    </a>
+                </td>
+                <td>
+                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="text-dark" style="text-decoration: none;">
+                        <span th:text="${samochod.model}"></span>
+                    </a>
+                </td>
+                <td th:text="${samochod.rokProdukcji}"></td>
+                <td>
+                    <span th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT')}"></span> zł
+                </td>
+                <td th:text="${samochod.kolor}"></td>
+                <td th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></td>
+                <td>
+                            <span th:if="${samochod.status == 'DOSTEPNY'}"
+                                  class="badge bg-success" th:text="${samochod.status}"></span>
+                    <span th:if="${samochod.status == 'SPRZEDANY'}"
+                          class="badge bg-danger" th:text="${samochod.status}"></span>
+                    <span th:if="${samochod.status == 'ZAREZERWOWANY'}"
+                          class="badge bg-warning" th:text="${samochod.status}"></span>
+                </td>
+                <td>
+                    <!-- Przyciski dla admina -->
+                    <div sec:authorize="hasRole('ADMIN')" class="btn-group-vertical">
+                        <a th:href="@{/samochody/edytuj(id=${samochod.id})}"
+                           class="btn btn-sm btn-warning mb-1">
+                            <i class="fas fa-edit"></i> Edytuj
+                        </a>
+                        <form th:action="@{/samochody/usun(id=${samochod.id})}"
+                              method="post" style="display: inline;"
+                              onsubmit="return confirm('Czy na pewno chcesz usunąć ten samochód?')">
+                            <button type="submit" class="btn btn-sm btn-danger">
+                                <i class="fas fa-trash"></i> Usuń
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Przyciski dla zalogowanych użytkowników (nie adminów) -->
+                    <div sec:authorize="isAuthenticated() and !hasRole('ADMIN')">
+                        <div th:if="${samochod.status == 'DOSTEPNY'}" class="btn-group-vertical">
+                            <form th:action="@{/samochody/zarezerwuj(id=${samochod.id})}"
+                                  method="post" style="display: inline;">
+                                <button type="submit" class="btn btn-sm btn-warning mb-1">
+                                    <i class="fas fa-clock"></i> Zarezerwuj
+                                </button>
+                            </form>
+                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
+                                  method="post" style="display: inline;"
+                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
+                                <button type="submit" class="btn btn-sm btn-success">
+                                    <i class="fas fa-shopping-cart"></i> Kup
+                                </button>
+                            </form>
+                        </div>
+
+                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}" class="btn-group-vertical">
+                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
+                                  method="post" style="display: inline;"
+                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
+                                <button type="submit" class="btn btn-sm btn-success mb-1">
+                                    <i class="fas fa-shopping-cart"></i> Kup
+                                </button>
+                            </form>
+                            <form th:action="@{/samochody/anuluj-rezerwacje(id=${samochod.id})}"
+                                  method="post" style="display: inline;">
+                                <button type="submit" class="btn btn-sm btn-secondary">
+                                    <i class="fas fa-times"></i> Anuluj
+                                </button>
+                            </form>
+                        </div>
+
+                        <div th:if="${samochod.status == 'SPRZEDANY'}">
+                            <span class="badge bg-danger">Sprzedany</span>
+                        </div>
+                    </div>
+
+                    <!-- Komunikat dla niezalogowanych użytkowników -->
+                    <div sec:authorize="!isAuthenticated()">
+                        <div th:if="${samochod.status == 'DOSTEPNY'}">
+                            <button class="btn btn-sm btn-outline-primary"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#loginInfoModal">
+                                <i class="fas fa-info-circle"></i> Zaloguj się
+                            </button>
+                        </div>
+                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
+                            <span class="badge bg-warning">Zarezerwowany</span>
+                        </div>
+                        <div th:if="${samochod.status == 'SPRZEDANY'}">
+                            <span class="badge bg-danger">Sprzedany</span>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div th:if="${samochody.empty}" class="alert alert-info text-center">
+        <i class="fas fa-car fa-2x mb-3"></i><br>
+        Brak samochodów w bazie danych.
+    </div>
+</div>
+
+<!-- Modal z informacją o konieczności logowania -->
+<div class="modal fade" id="loginInfoModal" tabindex="-1" aria-labelledby="loginInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="loginInfoModalLabel">
+                    <i class="fas fa-info-circle text-primary"></i> Informacja
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Aby zobaczyć pełne szczegóły samochodów i móc je rezerwować, musisz się zalogować.</p>
+                <div class="alert alert-info">
+                    <strong>Po zalogowaniu będziesz mógł:</strong>
+                    <ul class="mb-0 mt-2">
+                        <li>Zobaczyć wszystkie parametry techniczne</li>
+                        <li>Obejrzeć zdjęcia w wysokiej rozdzielczości</li>
+                        <li>Zarezerwować wybrane samochody</li>
+                        <li>Skontaktować się w sprawie zakupu</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Później</button>
+                <a href="/login" class="btn btn-primary">
+                    <i class="fas fa-sign-in-alt"></i> Przejdź do logowania
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\samochody\szczegoly.html
+-----------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Szczegóły Samochodu</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .car-image-large {
+            width: 100%;
+            max-width: 600px;
+            height: 400px;
+            object-fit: cover;
+            border-radius: 10px;
+        }
+        .no-image-large {
+            width: 100%;
+            max-width: 600px;
+            height: 400px;
+            background-color: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-size: 4rem;
+        }
+        .specs-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+        }
+        .price-tag {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #28a745;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <div sec:authorize="isAuthenticated()">
+                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+            <div sec:authorize="!isAuthenticated()">
+                <a class="nav-link" href="/login">Zaloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8">
+            <!-- Zdjęcie samochodu -->
+            <div class="text-center mb-4">
+                <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
+                    <img th:src="${samochod.zdjecieUrl}"
+                         th:alt="${samochod.marka + ' ' + samochod.model}"
+                         class="car-image-large shadow">
+                </div>
+                <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image-large">
+                    <i class="fas fa-car"></i>
+                </div>
+            </div>
+
+            <!-- Szczegóły techniczne -->
+            <div class="card mb-4">
+                <div class="card-header specs-card">
+                    <h4 class="mb-0"><i class="fas fa-cogs me-2"></i>Szczegóły techniczne</h4>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-borderless">
+                                <tr>
+                                    <td><strong>Marka:</strong></td>
+                                    <td th:text="${samochod.marka}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Model:</strong></td>
+                                    <td th:text="${samochod.model}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Rok produkcji:</strong></td>
+                                    <td th:text="${samochod.rokProdukcji}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Przebieg:</strong></td>
+                                    <td th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-borderless">
+                                <tr>
+                                    <td><strong>Pojemność silnika:</strong></td>
+                                    <td th:text="${samochod.pojemnoscSilnika + ' L'}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Rodzaj paliwa:</strong></td>
+                                    <td th:text="${samochod.rodzajPaliwa}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Skrzynia biegów:</strong></td>
+                                    <td th:text="${samochod.skrzyniaBiegow}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Kolor:</strong></td>
+                                    <td th:text="${samochod.kolor}"></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <!-- Panel boczny z ceną i akcjami -->
+            <div class="card sticky-top" style="top: 20px;">
+                <div class="card-body text-center">
+                    <h3 th:text="${samochod.marka + ' ' + samochod.model}"></h3>
+                    <div class="price-tag mb-3" th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zł'}"></div>
+
+                    <!-- Status -->
+                    <div class="mb-3">
+                            <span th:if="${samochod.status == 'DOSTEPNY'}"
+                                  class="badge bg-success fs-6" th:text="${samochod.status}"></span>
+                        <span th:if="${samochod.status == 'SPRZEDANY'}"
+                              class="badge bg-danger fs-6" th:text="${samochod.status}"></span>
+                        <span th:if="${samochod.status == 'ZAREZERWOWANY'}"
+                              class="badge bg-warning fs-6" th:text="${samochod.status}"></span>
+                    </div>
+
+                    <!-- Przyciski akcji dla zalogowanych użytkowników -->
+                    <div sec:authorize="isAuthenticated() and !hasRole('ADMIN')">
+                        <div th:if="${samochod.status == 'DOSTEPNY'}" class="d-grid gap-2">
+                            <form th:action="@{/samochody/zarezerwuj(id=${samochod.id})}"
+                                  method="post">
+                                <button type="submit" class="btn btn-warning btn-lg w-100 mb-2">
+                                    <i class="fas fa-clock"></i> Zarezerwuj
+                                </button>
+                            </form>
+                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
+                                  method="post"
+                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
+                                <button type="submit" class="btn btn-success btn-lg w-100">
+                                    <i class="fas fa-shopping-cart"></i> Kup teraz
+                                </button>
+                            </form>
+                        </div>
+
+                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}" class="d-grid gap-2">
+                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
+                                  method="post"
+                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
+                                <button type="submit" class="btn btn-success btn-lg w-100 mb-2">
+                                    <i class="fas fa-shopping-cart"></i> Kup teraz
+                                </button>
+                            </form>
+                            <form th:action="@{/samochody/anuluj-rezerwacje(id=${samochod.id})}"
+                                  method="post">
+                                <button type="submit" class="btn btn-secondary btn-lg w-100">
+                                    <i class="fas fa-times"></i> Anuluj rezerwację
+                                </button>
+                            </form>
+                        </div>
+
+                        <div th:if="${samochod.status == 'SPRZEDANY'}">
+                            <div class="alert alert-danger text-center">
+                                <i class="fas fa-times-circle"></i><br>
+                                Ten samochód został już sprzedany
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Komunikat dla niezalogowanych -->
+                    <div sec:authorize="!isAuthenticated()">
+                        <div th:if="${samochod.status == 'DOSTEPNY'}">
+                            <a href="/login" class="btn btn-primary btn-lg w-100 mb-2">
+                                <i class="fas fa-sign-in-alt"></i> Zaloguj się, aby zarezerwować
+                            </a>
+                        </div>
+                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
+                            <div class="alert alert-warning text-center">
+                                <i class="fas fa-clock"></i><br>
+                                Samochód zarezerwowany
+                            </div>
+                        </div>
+                        <div th:if="${samochod.status == 'SPRZEDANY'}">
+                            <div class="alert alert-danger text-center">
+                                <i class="fas fa-times-circle"></i><br>
+                                Samochód sprzedany
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Przyciski admina -->
+                    <div sec:authorize="hasRole('ADMIN')" class="d-grid gap-2 mt-3">
+                        <a th:href="@{/samochody/edytuj(id=${samochod.id})}"
+                           class="btn btn-warning">
+                            <i class="fas fa-edit"></i> Edytuj
+                        </a>
+                        <form th:action="@{/samochody/usun(id=${samochod.id})}"
+                              method="post"
+                              onsubmit="return confirm('Czy na pewno chcesz usunąć ten samochód?')">
+                            <button type="submit" class="btn btn-danger w-100">
+                                <i class="fas fa-trash"></i> Usuń
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Przycisk powrotu -->
+    <div class="mt-4">
+        <a href="/samochody" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Powrót do listy samochodów
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

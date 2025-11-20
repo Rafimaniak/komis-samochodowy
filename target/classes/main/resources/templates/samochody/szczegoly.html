@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Szczegóły Samochodu</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .car-image-large {
+            width: 100%;
+            max-width: 600px;
+            height: 400px;
+            object-fit: cover;
+            border-radius: 10px;
+        }
+        .no-image-large {
+            width: 100%;
+            max-width: 600px;
+            height: 400px;
+            background-color: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-size: 4rem;
+        }
+        .specs-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+        }
+        .price-tag {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #28a745;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <div sec:authorize="isAuthenticated()">
+                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+            <div sec:authorize="!isAuthenticated()">
+                <a class="nav-link" href="/login">Zaloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8">
+            <!-- Zdjęcie samochodu -->
+            <div class="text-center mb-4">
+                <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
+                    <img th:src="${samochod.zdjecieUrl}"
+                         th:alt="${samochod.marka + ' ' + samochod.model}"
+                         class="car-image-large shadow">
+                </div>
+                <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image-large">
+                    <i class="fas fa-car"></i>
+                </div>
+            </div>
+
+            <!-- Szczegóły techniczne -->
+            <div class="card mb-4">
+                <div class="card-header specs-card">
+                    <h4 class="mb-0"><i class="fas fa-cogs me-2"></i>Szczegóły techniczne</h4>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-borderless">
+                                <tr>
+                                    <td><strong>Marka:</strong></td>
+                                    <td th:text="${samochod.marka}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Model:</strong></td>
+                                    <td th:text="${samochod.model}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Rok produkcji:</strong></td>
+                                    <td th:text="${samochod.rokProdukcji}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Przebieg:</strong></td>
+                                    <td th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-borderless">
+                                <tr>
+                                    <td><strong>Pojemność silnika:</strong></td>
+                                    <td th:text="${samochod.pojemnoscSilnika + ' L'}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Rodzaj paliwa:</strong></td>
+                                    <td th:text="${samochod.rodzajPaliwa}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Skrzynia biegów:</strong></td>
+                                    <td th:text="${samochod.skrzyniaBiegow}"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Kolor:</strong></td>
+                                    <td th:text="${samochod.kolor}"></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <!-- Panel boczny z ceną i akcjami -->
+            <div class="card sticky-top" style="top: 20px;">
+                <div class="card-body text-center">
+                    <h3 th:text="${samochod.marka + ' ' + samochod.model}"></h3>
+                    <div class="price-tag mb-3" th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zł'}"></div>
+
+                    <!-- Status -->
+                    <div class="mb-3">
+                            <span th:if="${samochod.status == 'DOSTEPNY'}"
+                                  class="badge bg-success fs-6" th:text="${samochod.status}"></span>
+                        <span th:if="${samochod.status == 'SPRZEDANY'}"
+                              class="badge bg-danger fs-6" th:text="${samochod.status}"></span>
+                        <span th:if="${samochod.status == 'ZAREZERWOWANY'}"
+                              class="badge bg-warning fs-6" th:text="${samochod.status}"></span>
+                    </div>
+
+                    <!-- Przyciski akcji dla zalogowanych użytkowników -->
+                    <div sec:authorize="isAuthenticated() and !hasRole('ADMIN')">
+                        <div th:if="${samochod.status == 'DOSTEPNY'}" class="d-grid gap-2">
+                            <form th:action="@{/samochody/zarezerwuj(id=${samochod.id})}"
+                                  method="post">
+                                <button type="submit" class="btn btn-warning btn-lg w-100 mb-2">
+                                    <i class="fas fa-clock"></i> Zarezerwuj
+                                </button>
+                            </form>
+                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
+                                  method="post"
+                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
+                                <button type="submit" class="btn btn-success btn-lg w-100">
+                                    <i class="fas fa-shopping-cart"></i> Kup teraz
+                                </button>
+                            </form>
+                        </div>
+
+                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}" class="d-grid gap-2">
+                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
+                                  method="post"
+                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
+                                <button type="submit" class="btn btn-success btn-lg w-100 mb-2">
+                                    <i class="fas fa-shopping-cart"></i> Kup teraz
+                                </button>
+                            </form>
+                            <form th:action="@{/samochody/anuluj-rezerwacje(id=${samochod.id})}"
+                                  method="post">
+                                <button type="submit" class="btn btn-secondary btn-lg w-100">
+                                    <i class="fas fa-times"></i> Anuluj rezerwację
+                                </button>
+                            </form>
+                        </div>
+
+                        <div th:if="${samochod.status == 'SPRZEDANY'}">
+                            <div class="alert alert-danger text-center">
+                                <i class="fas fa-times-circle"></i><br>
+                                Ten samochód został już sprzedany
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Komunikat dla niezalogowanych -->
+                    <div sec:authorize="!isAuthenticated()">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i>
+                            Aby móc rezerwować lub kupować ten samochód,
+                            <a href="/login" class="alert-link">zaloguj się</a>.
+                        </div>
+                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
+                            <div class="alert alert-warning text-center">
+                                <i class="fas fa-clock"></i><br>
+                                Samochód zarezerwowany
+                            </div>
+                        </div>
+                        <div th:if="${samochod.status == 'SPRZEDANY'}">
+                            <div class="alert alert-danger text-center">
+                                <i class="fas fa-times-circle"></i><br>
+                                Samochód sprzedany
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Przyciski admina -->
+                    <div sec:authorize="hasRole('ADMIN')" class="d-grid gap-2 mt-3">
+                        <a th:href="@{/samochody/edytuj(id=${samochod.id})}"
+                           class="btn btn-warning">
+                            <i class="fas fa-edit"></i> Edytuj
+                        </a>
+                        <form th:action="@{/samochody/usun(id=${samochod.id})}"
+                              method="post"
+                              onsubmit="return confirm('Czy na pewno chcesz usunąć ten samochód?')">
+                            <button type="submit" class="btn btn-danger w-100">
+                                <i class="fas fa-trash"></i> Usuń
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Przycisk powrotu -->
+    <div class="mt-4">
+        <a href="/samochody" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Powrót do listy samochodów
+        </a>
+        <a href="/" class="btn btn-outline-secondary ms-2">
+            <i class="fas fa-home"></i> Strona główna
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

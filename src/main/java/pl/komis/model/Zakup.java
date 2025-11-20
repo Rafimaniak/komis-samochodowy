@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.math.BigDecimal;
 
 @Entity
+@Table(name = "zakupy")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -14,7 +15,7 @@ public class Zakup {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long idZakupu;
+    private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_samochodu")

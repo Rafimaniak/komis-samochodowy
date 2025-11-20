@@ -9,6 +9,7 @@ import java.time.LocalDate;
 
 
 @Entity
+@Table(name = "serwis")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -17,7 +18,7 @@ public class Serwis {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long idSerwisu;
+    private Long id;
 
 
     @ManyToOne(fetch = FetchType.LAZY)

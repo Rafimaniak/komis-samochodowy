@@ -6,6 +6,7 @@ import lombok.*;
 
 
 @Entity
+@Table(name = "zdjecia")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -14,7 +15,7 @@ public class Zdjecie {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long idZdjecia;
+    private Long id;
 
 
     private String url;

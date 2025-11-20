@@ -1,22 +1,18 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/Komis
+    url: jdbc:postgresql://localhost:5432/komis
     username: postgres
     password: student
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: create  # utworzy tabele
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
-        hbm2ddl.import_files: import.sql
-        hbm2ddl.import_files_sql_extractor: org.hibernate.tool.schema.internal.script.SingleLineSqlScriptExtractor
-  sql:
-    init:
-      mode: never  # WYŁĄCZ import.sql
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
 
 server:
   port: 8080

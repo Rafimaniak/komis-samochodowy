@@ -11,6 +11,7 @@ import java.util.List;
 
 
 @Entity
+@Table(name = "pracownicy")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

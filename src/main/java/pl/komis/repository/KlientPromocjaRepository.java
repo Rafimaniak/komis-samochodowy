@@ -12,6 +12,6 @@ public interface KlientPromocjaRepository extends JpaRepository<KlientPromocja, 
     @Query("SELECT kp FROM KlientPromocja kp WHERE kp.klient.id = :klientId")
     List<KlientPromocja> findByKlientId(@Param("klientId") Long klientId);
 
-    @Query("SELECT kp FROM KlientPromocja kp WHERE kp.promocja.idPromocji = :promocjaId")
+    @Query("SELECT kp FROM KlientPromocja kp WHERE kp.promocja.id = :promocjaId")
     List<KlientPromocja> findByPromocjaId(@Param("promocjaId") Long promocjaId);
 }

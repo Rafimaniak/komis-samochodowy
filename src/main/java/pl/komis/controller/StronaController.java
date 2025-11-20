@@ -1,6 +1,8 @@
 package pl.komis.controller;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,18 +22,15 @@ public class StronaController {
         List<Samochod> samochody = samochodService.findAll();
         model.addAttribute("samochody", samochody);
         model.addAttribute("tytul", "Komis Samochodowy - Strona Główna");
-        return "index";
-    }
 
-    @GetMapping("/samochody")
-    public String listaSamochodow(Model model) {
-        try {
-            List<Samochod> samochody = samochodService.findAll();
-            model.addAttribute("samochody", samochody);
-            return "samochody";
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "error";
-        }
+        // Sprawdź czy użytkownik jest zalogowany
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        boolean isAuthenticated = authentication != null &&
+                authentication.isAuthenticated() &&
+                !authentication.getName().equals("anonymousUser");
+        model.addAttribute("isAuthenticated", isAuthenticated);
+        model.addAttribute("username", authentication.getName());
+
+        return "index";
     }
 }
