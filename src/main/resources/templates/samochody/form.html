@@ -11,6 +11,16 @@
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
         <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <!-- Dodaj tę sekcję do navbar -->
+        <div class="navbar-nav">
+            <!-- Link Klienci tylko dla admina -->
+            <div sec:authorize="hasRole('ADMIN')">
+                <a class="nav-link" th:href="@{/klienci}">Klienci</a>
+                <a class="nav-link" th:href="@{/pracownicy}">Pracownicy</a>
+            </div>
+        </div>
+
         <div class="navbar-nav ms-auto">
             <span class="navbar-text me-3" sec:authentication="name"></span>
             <a class="nav-link" href="/samochody">Powrót do listy</a>

@@ -1,28 +1,34 @@
 package pl.komis.config;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import pl.komis.service.CustomUserDetailsService;
 
 @Configuration
 @EnableWebSecurity
+@RequiredArgsConstructor
 public class SecurityConfig {
+
+    private final CustomUserDetailsService customUserDetailsService;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/hello", "/samochody", "/samochody/szczegoly").permitAll()
-                        .requestMatchers("/samochody/nowy", "/samochody/edytuj/**", "/samochody/zapisz", "/samochody/usun/**").hasRole("ADMIN")
+                        .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/**",
+                                "/samochody", "/samochody/szczegoly", "/register",
+                                "/generate-password", "/test-passwords").permitAll() // DODAJ TE ŚCIEŻKI
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/klienci", "/pracownicy").hasRole("ADMIN")
+                        .requestMatchers("/samochody/nowy", "/samochody/edytuj/**", "/samochody/zapisz",
+                                "/samochody/usun/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
@@ -36,26 +42,10 @@ public class SecurityConfig {
                         .invalidateHttpSession(true)
                         .deleteCookies("JSESSIONID")
                         .permitAll()
-                );
+                )
+                .userDetailsService(customUserDetailsService);
 
         return http.build();
-    }
-
-    @Bean
-    public UserDetailsService userDetailsService() {
-        UserDetails user = User.builder()
-                .username("user")
-                .password(passwordEncoder().encode("user"))
-                .roles("USER")
-                .build();
-
-        UserDetails admin = User.builder()
-                .username("admin")
-                .password(passwordEncoder().encode("admin"))
-                .roles("ADMIN", "USER")
-                .build();
-
-        return new InMemoryUserDetailsManager(user, admin);
     }
 
     @Bean

@@ -2,6 +2,7 @@
   <dictionary name="project">
     <words>
       <w>jsdelivr</w>
+      <w>postgre</w>
     </words>
   </dictionary>
 </component>

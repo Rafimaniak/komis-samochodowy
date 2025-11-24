@@ -1,5 +1,5 @@
 Eksport struktury katalog�w i plik�w
-Wygenerowano: 11/20/2025 04:07:09
+Wygenerowano: 11/24/2025 03:30:27
 
 
 
@@ -7,14 +7,23 @@ Wygenerowano: 11/20/2025 04:07:09
 --------------------------------------------------------
 package pl.komis;
 
-
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 @SpringBootApplication
 public class KomisApplication {
+
     public static void main(String[] args) {
+//        // Tymczasowe generowanie haseł
+//        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+//
+//        System.out.println("=== GENEROWANIE HASEŁ BCrypt ===");
+//        System.out.println("admin: " + encoder.encode("admin"));
+//        System.out.println("user: " + encoder.encode("user"));
+//        System.out.println("testowy: " + encoder.encode("testowy"));
+//        System.out.println("=== KONIEC ===");
+
         SpringApplication.run(KomisApplication.class, args);
     }
 }
@@ -82,29 +91,35 @@ public class DataLoader implements CommandLineRunner {
 -------------------------------------------------------------
 package pl.komis.config;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import pl.komis.service.CustomUserDetailsService;
 
 @Configuration
 @EnableWebSecurity
+@RequiredArgsConstructor
 public class SecurityConfig {
+
+    private final CustomUserDetailsService customUserDetailsService;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/hello", "/samochody").permitAll()
-                        .requestMatchers("/samochody/nowy", "/samochody/edytuj/**", "/samochody/zapisz", "/samochody/usun/**").hasRole("ADMIN")
+                        .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/**",
+                                "/samochody", "/samochody/szczegoly", "/register",
+                                "/generate-password", "/test-passwords").permitAll() // DODAJ TE ŚCIEŻKI
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/klienci", "/pracownicy").hasRole("ADMIN")
+                        .requestMatchers("/samochody/nowy", "/samochody/edytuj/**", "/samochody/zapisz",
+                                "/samochody/usun/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
@@ -118,31 +133,250 @@ public class SecurityConfig {
                         .invalidateHttpSession(true)
                         .deleteCookies("JSESSIONID")
                         .permitAll()
-                );
+                )
+                .userDetailsService(customUserDetailsService);
 
         return http.build();
     }
 
     @Bean
-    public UserDetailsService userDetailsService() {
-        UserDetails user = User.builder()
-                .username("user")
-                .password(passwordEncoder().encode("user"))
-                .roles("USER")
-                .build();
-
-        UserDetails admin = User.builder()
-                .username("admin")
-                .password(passwordEncoder().encode("admin"))
-                .roles("ADMIN", "USER")
-                .build();
-
-        return new InMemoryUserDetailsManager(user, admin);
-    }
-
-    @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\AdminController.java
+------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import pl.komis.service.SamochodService;
+import pl.komis.service.UserService;
+
+@Controller
+@RequestMapping("/admin")
+@PreAuthorize("hasRole('ADMIN')")
+@RequiredArgsConstructor
+public class AdminController {
+
+    private final UserService userService;
+    private final SamochodService samochodService;
+
+    @GetMapping
+    public String adminPanel(Model model) {
+        long totalUsers = userService.count();
+        long totalCars = samochodService.findAll().size();
+        long availableCars = samochodService.findByStatus("DOSTEPNY").size();
+
+        model.addAttribute("totalUsers", totalUsers);
+        model.addAttribute("totalCars", totalCars);
+        model.addAttribute("availableCars", availableCars);
+        model.addAttribute("tytul", "Panel Administracyjny");
+
+        return "admin/panel";
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\AdminUserController.java
+----------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+import pl.komis.model.User;
+import pl.komis.service.UserService;
+
+import java.util.Arrays;
+import java.util.List;
+
+@Controller
+@RequestMapping("/admin/users")
+@PreAuthorize("hasRole('ADMIN')")
+@RequiredArgsConstructor
+public class AdminUserController {
+
+    private final UserService userService;
+    private final PasswordEncoder passwordEncoder;
+
+    @GetMapping
+    public String listUsers(Model model) {
+        List<User> users = userService.findAll();
+        model.addAttribute("users", users);
+        model.addAttribute("tytul", "Zarządzanie użytkownikami");
+        return "admin/users";
+    }
+
+    @GetMapping("/create")
+    public String showCreateForm(Model model) {
+        model.addAttribute("user", new User());
+        model.addAttribute("tytul", "Dodaj nowego użytkownika");
+        model.addAttribute("roles", Arrays.asList("USER", "ADMIN"));
+        return "admin/user-form";
+    }
+
+    @PostMapping("/create")
+    public String createUser(@ModelAttribute User user,
+                             @RequestParam("password") String password,
+                             @RequestParam("role") String role,
+                             RedirectAttributes redirectAttributes) {
+        try {
+            userService.createUserByAdmin(user, password, role);
+            redirectAttributes.addFlashAttribute("successMessage", "Użytkownik został utworzony pomyślnie");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("errorMessage", "Błąd podczas tworzenia użytkownika: " + e.getMessage());
+        }
+        return "redirect:/admin/users";
+    }
+
+    @GetMapping("/edit/{id}")
+    public String showEditForm(@PathVariable("id") Long id, Model model) {
+        User user = userService.findById(id)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+        model.addAttribute("user", user);
+        model.addAttribute("tytul", "Edytuj użytkownika");
+        model.addAttribute("roles", Arrays.asList("USER", "ADMIN"));
+        return "admin/user-form";
+    }
+
+    @PostMapping("/edit/{id}")
+    public String updateUser(@PathVariable("id") Long id,
+                             @ModelAttribute User user,
+                             @RequestParam(value = "newPassword", required = false) String newPassword,
+                             RedirectAttributes redirectAttributes) {
+        try {
+            User existingUser = userService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            existingUser.setUsername(user.getUsername());
+            existingUser.setEmail(user.getEmail());
+            existingUser.setRole(user.getRole());
+            existingUser.setEnabled(user.getEnabled());
+
+            // Zmiana hasła jeśli podano nowe
+            if (newPassword != null && !newPassword.trim().isEmpty()) {
+                existingUser.setPassword(passwordEncoder.encode(newPassword));
+            }
+
+            userService.updateUser(existingUser);
+            redirectAttributes.addFlashAttribute("successMessage", "Użytkownik został zaktualizowany pomyślnie");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("errorMessage", "Błąd podczas aktualizacji użytkownika: " + e.getMessage());
+        }
+        return "redirect:/admin/users";
+    }
+
+    @GetMapping("/change-password/{id}")
+    public String showChangePasswordForm(@PathVariable("id") Long id, Model model) {
+        User user = userService.findById(id)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+        model.addAttribute("user", user);
+        model.addAttribute("tytul", "Zmiana hasła użytkownika");
+        return "admin/change-password";
+    }
+
+    @PostMapping("/change-password/{id}")
+    public String changePassword(@PathVariable("id") Long id,
+                                 @RequestParam("newPassword") String newPassword,
+                                 @RequestParam("confirmPassword") String confirmPassword,
+                                 RedirectAttributes redirectAttributes) {
+        try {
+            if (!newPassword.equals(confirmPassword)) {
+                redirectAttributes.addFlashAttribute("errorMessage", "Hasła nie są identyczne");
+                return "redirect:/admin/users/change-password/" + id;
+            }
+
+            User user = userService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            user.setPassword(passwordEncoder.encode(newPassword));
+            userService.updateUser(user);
+
+            redirectAttributes.addFlashAttribute("successMessage", "Hasło zostało zmienione pomyślnie");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("errorMessage", "Błąd podczas zmiany hasła: " + e.getMessage());
+        }
+        return "redirect:/admin/users";
+    }
+
+    @PostMapping("/toggle-status/{id}")
+    public String toggleUserStatus(@PathVariable("id") Long id, RedirectAttributes redirectAttributes) {
+        try {
+            User user = userService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            user.setEnabled(!user.getEnabled());
+            userService.updateUser(user);
+
+            String status = user.getEnabled() ? "aktywowane" : "dezaktywowane";
+            redirectAttributes.addFlashAttribute("successMessage",
+                    "Konto użytkownika " + user.getUsername() + " zostało " + status);
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("errorMessage", "Błąd podczas zmiany statusu użytkownika: " + e.getMessage());
+        }
+        return "redirect:/admin/users";
+    }
+
+    @PostMapping("/delete/{id}")
+    public String deleteUser(@PathVariable("id") Long id, RedirectAttributes redirectAttributes) {
+        try {
+            User user = userService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            userService.deleteUser(id);
+            redirectAttributes.addFlashAttribute("successMessage",
+                    "Użytkownik " + user.getUsername() + " został usunięty pomyślnie");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("errorMessage", "Błąd podczas usuwania użytkownika: " + e.getMessage());
+        }
+        return "redirect:/admin/users";
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\KlientController.java
+-------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import pl.komis.model.User;
+import pl.komis.service.UserService;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Controller
+@RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
+public class KlientController {
+
+    private final UserService userService;
+
+    @GetMapping("/klienci")
+    public String listaKlientow(Model model) {
+        // Pobierz wszystkich użytkowników z rolą USER
+        List<User> klienci = userService.findAll().stream()
+                .filter(user -> "USER".equals(user.getRole()))
+                .collect(Collectors.toList());
+
+        model.addAttribute("klienci", klienci);
+        model.addAttribute("tytul", "Lista Klientów");
+        return "klienci";
     }
 }
 
@@ -220,6 +454,78 @@ public class LoginController {
 }
 
 
+�CIE�KA: src\main\java\pl\komis\controller\PasswordGeneratorController.java
+------------------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+
+@Controller
+@RequiredArgsConstructor
+public class PasswordGeneratorController {
+
+    private final PasswordEncoder passwordEncoder;
+
+    @GetMapping("/password-generator")
+    public String showPasswordGenerator() {
+        return "password-generator";
+    }
+
+    @GetMapping("/generate")
+    public String generatePassword(@RequestParam String password, Model model) {
+        String encodedPassword = passwordEncoder.encode(password);
+
+        model.addAttribute("rawPassword", password);
+        model.addAttribute("encodedPassword", encodedPassword);
+        model.addAttribute("sqlUpdate",
+                "UPDATE users SET password = '" + encodedPassword + "' WHERE username = 'twoja_nazwa_uzytkownika';");
+
+        return "password-generator";
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\PracownikController.java
+----------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import pl.komis.model.User;
+import pl.komis.service.UserService;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Controller
+@RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
+public class PracownikController {
+
+    private final UserService userService;
+
+    @GetMapping("/pracownicy")
+    public String listaPracownikow(Model model) {
+        // Pobierz wszystkich użytkowników z rolą ADMIN
+        List<User> pracownicy = userService.findAll().stream()
+                .filter(user -> "ADMIN".equals(user.getRole()))
+                .collect(Collectors.toList());
+
+        model.addAttribute("pracownicy", pracownicy);
+        model.addAttribute("tytul", "Lista Pracowników");
+        return "pracownicy";
+    }
+}
+
+
 �CIE�KA: src\main\java\pl\komis\controller\PromocjaController.java
 ---------------------------------------------------------------------
 package pl.komis.controller;
@@ -286,6 +592,91 @@ public class PromocjaController {
     }
 }
 
+
+
+�CIE�KA: src\main\java\pl\komis\controller\RegisterController.java
+---------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.validation.BindingResult;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+import pl.komis.dto.RegisterRequest;
+import pl.komis.model.User;
+import pl.komis.service.UserService;
+
+import jakarta.validation.Valid;
+
+@Controller
+@RequiredArgsConstructor
+public class RegisterController {
+
+    private final UserService userService;
+
+    @GetMapping("/register")
+    public String showRegistrationForm(Model model) {
+        model.addAttribute("registerRequest", new RegisterRequest());
+        model.addAttribute("tytul", "Rejestracja - Komis Samochodowy");
+        return "register";
+    }
+
+    @PostMapping("/register")
+    public String registerUser(@Valid @ModelAttribute RegisterRequest registerRequest,
+                               BindingResult bindingResult,
+                               Model model,
+                               RedirectAttributes redirectAttributes) {
+
+        // Walidacja podstawowa
+        if (bindingResult.hasErrors()) {
+            model.addAttribute("tytul", "Rejestracja - Komis Samochodowy");
+            return "register";
+        }
+
+        // Walidacja hasła
+        if (!registerRequest.getPassword().equals(registerRequest.getConfirmPassword())) {
+            bindingResult.rejectValue("confirmPassword", "error.registerRequest", "Hasła nie są identyczne");
+            model.addAttribute("tytul", "Rejestracja - Komis Samochodowy");
+            return "register";
+        }
+
+        // Sprawdź czy użytkownik już istnieje
+        if (userService.usernameExists(registerRequest.getUsername())) {
+            bindingResult.rejectValue("username", "error.registerRequest", "Nazwa użytkownika jest już zajęta");
+            model.addAttribute("tytul", "Rejestracja - Komis Samochodowy");
+            return "register";
+        }
+
+        if (userService.emailExists(registerRequest.getEmail())) {
+            bindingResult.rejectValue("email", "error.registerRequest", "Email jest już zajęty");
+            model.addAttribute("tytul", "Rejestracja - Komis Samochodowy");
+            return "register";
+        }
+
+        try {
+            // Stwórz nowego użytkownika
+            User user = User.builder()
+                    .username(registerRequest.getUsername())
+                    .email(registerRequest.getEmail())
+                    .role("USER")
+                    .build();
+
+            userService.registerUser(user, registerRequest.getPassword());
+
+            redirectAttributes.addFlashAttribute("successMessage", "Konto zostało utworzone pomyślnie! Możesz się teraz zalogować.");
+            return "redirect:/login";
+
+        } catch (Exception e) {
+            model.addAttribute("errorMessage", "Wystąpił błąd podczas rejestracji: " + e.getMessage());
+            model.addAttribute("tytul", "Rejestracja - Komis Samochodowy");
+            return "register";
+        }
+    }
+}
 
 
 �CIE�KA: src\main\java\pl\komis\controller\SamochodController.java
@@ -480,28 +871,71 @@ public class StronaController {
 -----------------------------------------------------------------
 package pl.komis.controller;
 
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import pl.komis.model.User;
+import pl.komis.repository.UserRepository;
 
 @RestController
-@RequestMapping("/api")
+@RequiredArgsConstructor
 public class TestController {
 
-    @GetMapping("/hello")
-    public String hello() {
-        return "Komis Samochodowy API działa! 🚗";
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    @GetMapping("/api/debug/password")
+    public String debugPassword(@RequestParam String username, @RequestParam String password) {
+        User user = userRepository.findByUsername(username)
+                .orElse(null);
+
+        if (user == null) {
+            return "User not found: " + username;
+        }
+
+        boolean matches = passwordEncoder.matches(password, user.getPassword());
+
+        return String.format(
+                "Username: %s<br>Stored password: %s<br>Input password: %s<br>Matches: %s<br>Password length: %d",
+                username,
+                user.getPassword(),
+                password,
+                matches,
+                user.getPassword().length()
+        );
     }
 
-    @GetMapping("/test")
-    public String test() {
-        return "Test endpoint działa poprawnie!";
-    }
+    @GetMapping("/api/debug/users")
+    public String debugUsers() {
+        StringBuilder result = new StringBuilder();
+        result.append("<h3>All Users:</h3>");
 
-    @GetMapping("/status")
-    public String status() {
-        return "Aplikacja jest uruchomiona - " + new java.util.Date();
+        userRepository.findAll().forEach(user -> {
+            result.append(String.format(
+                    "Username: %s, Email: %s, Role: %s, Enabled: %s<br>",
+                    user.getUsername(), user.getEmail(), user.getRole(), user.getEnabled()
+            ));
+        });
+
+        return result.toString();
     }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\dto\RegisterRequest.java
+-----------------------------------------------------------
+package pl.komis.dto;
+
+import lombok.Data;
+
+@Data
+public class RegisterRequest {
+    private String username;
+    private String email;
+    private String password;
+    private String confirmPassword;
 }
 
 
@@ -939,6 +1373,51 @@ public class Sprzedaz {
 }
 
 
+�CIE�KA: src\main\java\pl\komis\model\User.java
+--------------------------------------------------
+package pl.komis.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "users")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(unique = true, nullable = false, length = 50)
+    private String username;
+
+    @Column(unique = true, nullable = false, length = 100)
+    private String email;
+
+    @Column(nullable = false, length = 255)
+    private String password;
+
+    @Column(length = 20)
+    private String role;
+
+    @Column(name = "enabled")
+    private Boolean enabled;
+
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "klient_id")
+    private Klient klient;
+}
+
+
 �CIE�KA: src\main\java\pl\komis\model\Zakup.java
 ---------------------------------------------------
 package pl.komis.model;
@@ -1160,6 +1639,26 @@ public interface SprzedazRepository extends JpaRepository<Sprzedaz, Long> {
 }
 
 
+�CIE�KA: src\main\java\pl\komis\repository\UserRepository.java
+-----------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+import pl.komis.model.User;
+
+import java.util.Optional;
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+
+    Optional<User> findByUsername(String username);
+    Optional<User> findByEmail(String email);
+    boolean existsByUsername(String username);
+    boolean existsByEmail(String email);
+}
+
+
 �CIE�KA: src\main\java\pl\komis\repository\ZakupRepository.java
 ------------------------------------------------------------------
 package pl.komis.repository;
@@ -1200,6 +1699,74 @@ public interface ZdjecieRepository extends JpaRepository<Zdjecie, Long> {
 
     @Query("SELECT z FROM Zdjecie z WHERE z.samochod.id = :samochodId")
     List<Zdjecie> findBySamochodId(@Param("samochodId") Long samochodId);
+}
+
+
+�CIE�KA: src\main\java\pl\komis\service\CustomUserDetailsService.java
+------------------------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+import pl.komis.model.User;
+import pl.komis.repository.UserRepository;
+
+import java.util.Collection;
+import java.util.Collections;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class CustomUserDetailsService implements UserDetailsService {
+
+    private final UserRepository userRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        log.info("=== PRÓBA LOGOWANIA ===");
+        log.info("Szukam użytkownika: {}", username);
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> {
+                    log.error("❌ Użytkownik nie znaleziony: {}", username);
+                    return new UsernameNotFoundException("Użytkownik nie znaleziony: " + username);
+                });
+
+        log.info("✅ Znaleziono użytkownika: {}", user.getUsername());
+        log.info("📧 Email: {}", user.getEmail());
+        log.info("🎯 Rola: {}", user.getRole());
+        log.info("🔓 Enabled: {}", user.getEnabled());
+        log.info("🔑 Długość hasła: {}", user.getPassword() != null ? user.getPassword().length() : "NULL");
+        log.info("=== KONIEC WCZYTYWANIA UŻYTKOWNIKA ===");
+
+        // Sprawdź czy użytkownik jest enabled
+        if (user.getEnabled() != null && !user.getEnabled()) {
+            log.error("❌ Konto użytkownika {} jest wyłączone", username);
+            throw new UsernameNotFoundException("Konto jest wyłączone: " + username);
+        }
+
+        return new org.springframework.security.core.userdetails.User(
+                user.getUsername(),
+                user.getPassword(),
+                user.getEnabled() == null ? true : user.getEnabled(), // domyślnie true jeśli null
+                true, // accountNonExpired
+                true, // credentialsNonExpired
+                true, // accountNonLocked
+                getAuthorities(user.getRole())
+        );
+    }
+
+    private Collection<? extends GrantedAuthority> getAuthorities(String role) {
+        String authority = "ROLE_" + (role != null ? role : "USER");
+        log.info("🏷️  Nadaję uprawnienie: {}", authority);
+        return Collections.singletonList(new SimpleGrantedAuthority(authority));
+    }
 }
 
 
@@ -1318,6 +1885,52 @@ public class KlientService {
 
 
 
+�CIE�KA: src\main\java\pl\komis\service\PracownikService.java
+----------------------------------------------------------------
+package pl.komis.service;
+
+import org.springframework.stereotype.Service;
+import pl.komis.model.Pracownik;
+import pl.komis.repository.PracownikRepository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Service
+public class PracownikService {
+
+    private final PracownikRepository pracownikRepository;
+
+    public PracownikService(PracownikRepository pracownikRepository) {
+        this.pracownikRepository = pracownikRepository;
+    }
+
+    // Pobierz wszystkich pracowników
+    public List<Pracownik> getAllPracownicy() {
+        return pracownikRepository.findAll();
+    }
+
+    // Pobierz pracownika po ID
+    public Optional<Pracownik> getPracownikById(Long id) {
+        return pracownikRepository.findById(id);
+    }
+
+    // Zapisz lub zaktualizuj pracownika
+    public Pracownik savePracownik(Pracownik pracownik) {
+        return pracownikRepository.save(pracownik);
+    }
+
+    // Usuń pracownika po ID
+    public void deletePracownik(Long id) {
+        pracownikRepository.deleteById(id);
+    }
+
+
+}
+
+
+
+
 �CIE�KA: src\main\java\pl\komis\service\PromocjaService.java
 ---------------------------------------------------------------
 package pl.komis.service;
@@ -1383,6 +1996,7 @@ public class PromocjaService {
 ---------------------------------------------------------------
 package pl.komis.service;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pl.komis.model.Samochod;
@@ -1391,52 +2005,481 @@ import pl.komis.repository.SamochodRepository;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
+@Transactional
 public class SamochodService {
 
     private final SamochodRepository samochodRepository;
 
-    public SamochodService(SamochodRepository samochodRepository) {
-        this.samochodRepository = samochodRepository;
-    }
-
+    @Transactional(readOnly = true)
     public List<Samochod> findAll() {
         return samochodRepository.findAll();
     }
 
+    @Transactional(readOnly = true)
     public Optional<Samochod> findById(Long id) {
         return samochodRepository.findById(id);
     }
 
+    @Transactional
     public Samochod save(Samochod samochod) {
         return samochodRepository.save(samochod);
     }
 
+    @Transactional
     public void delete(Long id) {
         samochodRepository.deleteById(id);
     }
 
+    @Transactional(readOnly = true)
     public List<Samochod> findByMarka(String marka) {
         return samochodRepository.findByMarkaIgnoreCase(marka);
     }
 
+    @Transactional(readOnly = true)
     public List<Samochod> findByModel(String model) {
         return samochodRepository.findByModelIgnoreCase(model);
     }
 
+    @Transactional(readOnly = true)
     public List<Samochod> findByStatus(String status) {
         return samochodRepository.findByStatus(status);
     }
 
+    @Transactional(readOnly = true)
     public List<Samochod> findByCenaBetween(BigDecimal min, BigDecimal max) {
         return samochodRepository.findByCenaBetween(min, max);
     }
 
+    @Transactional(readOnly = true)
     public List<Samochod> findByCenaBetween(double min, double max) {
         BigDecimal minCena = BigDecimal.valueOf(min);
         BigDecimal maxCena = BigDecimal.valueOf(max);
         return samochodRepository.findByCenaBetween(minCena, maxCena);
+    }
+
+    // Dodatkowe przydatne metody:
+
+    @Transactional(readOnly = true)
+    public long count() {
+        return samochodRepository.count();
+    }
+
+    @Transactional(readOnly = true)
+    public long countByStatus(String status) {
+        return samochodRepository.findByStatus(status).size();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> findAvailableCars() {
+        return samochodRepository.findByStatus("DOSTEPNY");
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> findSoldCars() {
+        return samochodRepository.findByStatus("SPRZEDANY");
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> findReservedCars() {
+        return samochodRepository.findByStatus("ZAREZERWOWANY");
+    }
+
+    @Transactional(readOnly = true)
+    public boolean existsById(Long id) {
+        return samochodRepository.existsById(id);
+    }
+
+    @Transactional
+    public Samochod updateStatus(Long id, String newStatus) {
+        Samochod samochod = samochodRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+        samochod.setStatus(newStatus);
+        return samochodRepository.save(samochod);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> findByRokProdukcjiBetween(int minRok, int maxRok) {
+        return samochodRepository.findAll().stream()
+                .filter(s -> s.getRokProdukcji() >= minRok && s.getRokProdukcji() <= maxRok)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> findByPrzebiegLessThan(int maxPrzebieg) {
+        return samochodRepository.findAll().stream()
+                .filter(s -> s.getPrzebieg() <= maxPrzebieg)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> findByRodzajPaliwa(String rodzajPaliwa) {
+        return samochodRepository.findAll().stream()
+                .filter(s -> rodzajPaliwa.equalsIgnoreCase(s.getRodzajPaliwa()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> findBySkrzyniaBiegow(String skrzyniaBiegow) {
+        return samochodRepository.findAll().stream()
+                .filter(s -> skrzyniaBiegow.equalsIgnoreCase(s.getSkrzyniaBiegow()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> findAllMarki() {
+        return samochodRepository.findAll().stream()
+                .map(Samochod::getMarka)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> findAllModele() {
+        return samochodRepository.findAll().stream()
+                .map(Samochod::getModel)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\service\UserService.java
+-----------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import pl.komis.model.User;
+import pl.komis.repository.UserRepository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class UserService {
+
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    // ==================== METODY REJESTRACJI I TWORZENIA ====================
+
+    public User registerUser(User user, String rawPassword) {
+        if (userRepository.existsByUsername(user.getUsername())) {
+            throw new RuntimeException("Nazwa użytkownika jest już zajęta");
+        }
+        if (userRepository.existsByEmail(user.getEmail())) {
+            throw new RuntimeException("Email jest już zajęty");
+        }
+
+        user.setPassword(passwordEncoder.encode(rawPassword));
+        user.setEnabled(true);
+        user.setCreatedAt(LocalDateTime.now());
+
+        // Domyślnie ustaw rolę USER, jeśli nie podano
+        if (user.getRole() == null) {
+            user.setRole("USER");
+        }
+
+        return userRepository.save(user);
+    }
+
+    public User createUserByAdmin(User user, String rawPassword, String role) {
+        if (userRepository.existsByUsername(user.getUsername())) {
+            throw new RuntimeException("Nazwa użytkownika jest już zajęta");
+        }
+        if (userRepository.existsByEmail(user.getEmail())) {
+            throw new RuntimeException("Email jest już zajęty");
+        }
+
+        user.setPassword(passwordEncoder.encode(rawPassword));
+        user.setEnabled(true);
+        user.setCreatedAt(LocalDateTime.now());
+        user.setRole(role);
+
+        return userRepository.save(user);
+    }
+
+    public User createUser(User user, String rawPassword) {
+        if (userRepository.existsByUsername(user.getUsername())) {
+            throw new RuntimeException("Nazwa użytkownika jest już zajęta");
+        }
+        if (userRepository.existsByEmail(user.getEmail())) {
+            throw new RuntimeException("Email jest już zajęty");
+        }
+
+        user.setPassword(passwordEncoder.encode(rawPassword));
+        user.setEnabled(true);
+        user.setCreatedAt(LocalDateTime.now());
+
+        // Domyślnie ustaw rolę USER, jeśli nie podano
+        if (user.getRole() == null) {
+            user.setRole("USER");
+        }
+
+        return userRepository.save(user);
+    }
+
+    // ==================== METODY ODCZYTU ====================
+
+    public List<User> findAll() {
+        return userRepository.findAll();
+    }
+
+    public List<User> findAllUsers() {
+        return userRepository.findAll();
+    }
+
+    public Optional<User> findById(Long id) {
+        return userRepository.findById(id);
+    }
+
+    public Optional<User> findUserById(Long id) {
+        return userRepository.findById(id);
+    }
+
+    public Optional<User> findByUsername(String username) {
+        return userRepository.findByUsername(username);
+    }
+
+    public Optional<User> findByEmail(String email) {
+        return userRepository.findByEmail(email);
+    }
+
+    // ==================== METODY AKTUALIZACJI ====================
+
+    public User updateUser(User user) {
+        // Sprawdź czy użytkownik istnieje
+        User existingUser = userRepository.findById(user.getId())
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        // Sprawdź unikalność username (jeśli się zmienił)
+        if (!existingUser.getUsername().equals(user.getUsername()) &&
+                userRepository.existsByUsername(user.getUsername())) {
+            throw new RuntimeException("Nazwa użytkownika jest już zajęta");
+        }
+
+        // Sprawdź unikalność email (jeśli się zmienił)
+        if (!existingUser.getEmail().equals(user.getEmail()) &&
+                userRepository.existsByEmail(user.getEmail())) {
+            throw new RuntimeException("Email jest już zajęty");
+        }
+
+        // Zachowaj hasło jeśli nie zostało zmienione
+        if (user.getPassword() == null || user.getPassword().isEmpty()) {
+            user.setPassword(existingUser.getPassword());
+        }
+
+        // Zachowaj datę utworzenia
+        user.setCreatedAt(existingUser.getCreatedAt());
+
+        return userRepository.save(user);
+    }
+
+    public User changePassword(Long userId, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        return userRepository.save(user);
+    }
+
+    public User toggleUserStatus(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        user.setEnabled(!user.getEnabled());
+        return userRepository.save(user);
+    }
+
+    public User activateUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        user.setEnabled(true);
+        return userRepository.save(user);
+    }
+
+    public User deactivateUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        user.setEnabled(false);
+        return userRepository.save(user);
+    }
+
+    public User changeUserRole(Long userId, String newRole) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        user.setRole(newRole);
+        return userRepository.save(user);
+    }
+
+    // ==================== METODY USUWANIA ====================
+
+    public void deleteUser(Long id) {
+        if (!userRepository.existsById(id)) {
+            throw new RuntimeException("Użytkownik nie znaleziony");
+        }
+        userRepository.deleteById(id);
+    }
+
+    public void deleteUserByUsername(String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+        userRepository.delete(user);
+    }
+
+    // ==================== METODY WALIDACJI I SPRAWDZANIA ====================
+
+    public boolean usernameExists(String username) {
+        return userRepository.existsByUsername(username);
+    }
+
+    public boolean emailExists(String email) {
+        return userRepository.existsByEmail(email);
+    }
+
+    public boolean existsById(Long id) {
+        return userRepository.existsById(id);
+    }
+
+    public long count() {
+        return userRepository.count();
+    }
+
+    public long countByRole(String role) {
+        return userRepository.findAll().stream()
+                .filter(user -> role.equals(user.getRole()))
+                .count();
+    }
+
+    public long countActiveUsers() {
+        return userRepository.findAll().stream()
+                .filter(User::getEnabled)
+                .count();
+    }
+
+    public long countInactiveUsers() {
+        return userRepository.findAll().stream()
+                .filter(user -> !user.getEnabled())
+                .count();
+    }
+
+    // ==================== METODY SPECJALNE ====================
+
+    public List<User> findByRole(String role) {
+        return userRepository.findAll().stream()
+                .filter(user -> role.equals(user.getRole()))
+                .collect(Collectors.toList());
+    }
+
+    public List<User> findActiveUsers() {
+        return userRepository.findAll().stream()
+                .filter(User::getEnabled)
+                .collect(Collectors.toList());
+    }
+
+    public List<User> findInactiveUsers() {
+        return userRepository.findAll().stream()
+                .filter(user -> !user.getEnabled())
+                .collect(Collectors.toList());
+    }
+
+    public List<User> findAdmins() {
+        return findByRole("ADMIN");
+    }
+
+    public List<User> findUsers() {
+        return findByRole("USER");
+    }
+
+    public boolean isUserActive(Long userId) {
+        return userRepository.findById(userId)
+                .map(User::getEnabled)
+                .orElse(false);
+    }
+
+    public boolean isUserAdmin(Long userId) {
+        return userRepository.findById(userId)
+                .map(user -> "ADMIN".equals(user.getRole()))
+                .orElse(false);
+    }
+
+    public boolean isUserRegular(Long userId) {
+        return userRepository.findById(userId)
+                .map(user -> "USER".equals(user.getRole()))
+                .orElse(false);
+    }
+
+    // ==================== METODY POMOCNICZE ====================
+
+    public void validateUserCredentials(String username, String password) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new RuntimeException("Nieprawidłowe hasło");
+        }
+    }
+
+    public boolean verifyPassword(Long userId, String rawPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        return passwordEncoder.matches(rawPassword, user.getPassword());
+    }
+
+    public User resetPassword(Long userId, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        return userRepository.save(user);
+    }
+
+    // ==================== METODY RAPORTOWANIA ====================
+
+    public UserStatistics getUserStatistics() {
+        long totalUsers = count();
+        long activeUsers = countActiveUsers();
+        long inactiveUsers = countInactiveUsers();
+        long adminUsers = countByRole("ADMIN");
+        long regularUsers = countByRole("USER");
+
+        return new UserStatistics(totalUsers, activeUsers, inactiveUsers, adminUsers, regularUsers);
+    }
+
+    // Klasa pomocnicza dla statystyk
+    public static class UserStatistics {
+        private final long totalUsers;
+        private final long activeUsers;
+        private final long inactiveUsers;
+        private final long adminUsers;
+        private final long regularUsers;
+
+        public UserStatistics(long totalUsers, long activeUsers, long inactiveUsers, long adminUsers, long regularUsers) {
+            this.totalUsers = totalUsers;
+            this.activeUsers = activeUsers;
+            this.inactiveUsers = inactiveUsers;
+            this.adminUsers = adminUsers;
+            this.regularUsers = regularUsers;
+        }
+
+        // Gettery
+        public long getTotalUsers() { return totalUsers; }
+        public long getActiveUsers() { return activeUsers; }
+        public long getInactiveUsers() { return inactiveUsers; }
+        public long getAdminUsers() { return adminUsers; }
+        public long getRegularUsers() { return regularUsers; }
     }
 }
 
@@ -1634,13 +2677,36 @@ server:
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
         <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
-        <div class="navbar-nav ms-auto">
-            <div sec:authorize="isAuthenticated()">
-                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
-                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="navbar-nav">
+                <a class="nav-link" href="/samochody">Samochody</a>
+                <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
+                        <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
+                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
+                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                    </ul>
+                </div>
             </div>
-            <div sec:authorize="!isAuthenticated()">
-                <a class="nav-link" href="/login">Zaloguj</a>
+
+            <div class="navbar-nav ms-auto">
+                <div sec:authorize="isAuthenticated()">
+                    <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                    <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
+                </div>
+                <div sec:authorize="!isAuthenticated()">
+                    <a class="nav-link" href="/login">Zaloguj</a>
+                    <a class="nav-link" href="/register">Rejestracja</a>
+                </div>
             </div>
         </div>
     </div>
@@ -1662,6 +2728,16 @@ server:
             <a th:href="@{/samochody}" class="btn btn-primary btn-lg">
                 <i class="fas fa-car"></i> Zobacz wszystkie samochody
             </a>
+
+            <!-- Przyciski tylko dla admina -->
+            <div sec:authorize="hasRole('ADMIN')">
+                <a th:href="@{/klienci}" class="btn btn-secondary btn-lg ms-2">
+                    <i class="fas fa-users"></i> Klienci
+                </a>
+                <a th:href="@{/pracownicy}" class="btn btn-secondary btn-lg ms-2">
+                    <i class="fas fa-user-tie"></i> Pracownicy
+                </a>
+            </div>
         </div>
     </div>
 
@@ -1739,11 +2815,10 @@ server:
                         </div>
 
                         <div sec:authorize="!isAuthenticated()" class="d-grid">
-                            <button class="btn btn-outline-primary"
-                                    data-bs-toggle="modal"
-                                    data-bs-target="#loginInfoModal">
-                                <i class="fas fa-info-circle"></i> Zobacz szczegóły
-                            </button>
+                            <a th:href="@{/samochody/szczegoly(id=${samochod.id})}"
+                               class="btn btn-outline-primary">
+                                <i class="fas fa-search"></i> Zobacz szczegóły
+                            </a>
                         </div>
                     </div>
                 </div>
@@ -1756,8 +2831,8 @@ server:
         Brak samochodów w ofercie. Sprawdź później!
     </div>
 
-    <!-- Informacja o konieczności logowania -->
-    <div class="row mt-5">
+    <!-- Informacja o konieczności logowania - POKAZUJ TYLKO DLA NIEZALOGOWANYCH -->
+    <div th:if="${not isAuthenticated}" class="row mt-5">
         <div class="col-12">
             <div class="card border-warning">
                 <div class="card-body text-center">
@@ -1809,6 +2884,78 @@ server:
 </html>
 
 
+�CIE�KA: src\main\resources\templates\klienci.html
+-----------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Lista Klientów</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <div class="navbar-nav">
+            <div sec:authorize="hasRole('ADMIN')">
+                <a class="nav-link" th:href="@{/klienci}">Klienci</a>
+                <a class="nav-link" th:href="@{/pracownicy}">Pracownicy</a>
+            </div>
+        </div>
+
+        <div class="navbar-nav ms-auto">
+            <div sec:authorize="isAuthenticated()">
+                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <h1 class="mb-4 text-center" th:text="${tytul}">Lista Klientów</h1>
+
+    <div th:if="${klienci.empty}" class="alert alert-info text-center">
+        Brak klientów w bazie danych.
+    </div>
+
+    <table th:if="${!klienci.empty}" class="table table-striped">
+        <thead class="table-dark">
+        <tr>
+            <th>ID</th>
+            <th>Nazwa użytkownika</th>
+            <th>Email</th>
+            <th>Rola</th>
+            <th>Status</th>
+            <th>Data utworzenia</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="klient : ${klienci}">
+            <td th:text="${klient.id}"></td>
+            <td th:text="${klient.username}"></td>
+            <td th:text="${klient.email}"></td>
+            <td>
+                <span th:if="${klient.role == 'USER'}" class="badge bg-primary" th:text="${klient.role}"></span>
+                <span th:if="${klient.role == 'ADMIN'}" class="badge bg-success" th:text="${klient.role}"></span>
+            </td>
+            <td>
+                <span th:if="${klient.enabled}" class="badge bg-success">Aktywny</span>
+                <span th:if="${!klient.enabled}" class="badge bg-danger">Nieaktywny</span>
+            </td>
+            <td th:text="${klient.createdAt}"></td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
 �CIE�KA: src\main\resources\templates\login.html
 ---------------------------------------------------
 <!DOCTYPE html>
@@ -1817,52 +2964,369 @@ server:
     <meta charset="UTF-8">
     <title>Logowanie - Komis Samochodowy</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .login-container {
             max-width: 400px;
             margin: 100px auto;
-            padding: 20px;
+            padding: 30px;
             border: 1px solid #ddd;
             border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        .brand-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .brand-header h2 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px;
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+            transform: translateY(-2px);
+            transition: all 0.3s ease;
         }
     </style>
 </head>
 <body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="/register">Zarejestruj się</a>
+        </div>
+    </div>
+</nav>
+
 <div class="container">
     <div class="login-container">
-        <h2 class="text-center mb-4">🚗 Logowanie</h2>
-
-        <div th:if="${param.error}" class="alert alert-danger">
-            Nieprawidłowa nazwa użytkownika lub hasło!
+        <div class="brand-header">
+            <h2>🚗 Komis Samochodowy</h2>
+            <p class="text-muted">Zaloguj się do swojego konta</p>
         </div>
 
-        <div th:if="${param.logout}" class="alert alert-success">
-            Zostałeś wylogowany pomyślnie!
+        <!-- Komunikat sukcesu (np. po rejestracji) -->
+        <div th:if="${successMessage}" class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="fas fa-check-circle"></i>
+            <span th:text="${successMessage}"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+
+        <!-- Komunikat o wylogowaniu -->
+        <div th:if="${param.logout}" class="alert alert-info alert-dismissible fade show" role="alert">
+            <i class="fas fa-info-circle"></i>
+            Zostałeś pomyślnie wylogowany!
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+
+        <!-- Komunikat o błędzie logowania -->
+        <div th:if="${param.error}" class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-triangle"></i>
+            Nieprawidłowa nazwa użytkownika lub hasło!
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
 
         <form th:action="@{/login}" method="post">
             <div class="mb-3">
-                <label for="username" class="form-label">Nazwa użytkownika:</label>
-                <input type="text" class="form-control" id="username" name="username" required>
+                <label for="username" class="form-label">
+                    <i class="fas fa-user"></i> Nazwa użytkownika:
+                </label>
+                <input type="text" class="form-control" id="username" name="username"
+                       placeholder="Wprowadź nazwę użytkownika" required
+                       th:classappend="${param.error != null} ? 'is-invalid' : ''">
+                <div class="invalid-feedback" th:if="${param.error}">
+                    Sprawdź poprawność nazwy użytkownika
+                </div>
             </div>
 
             <div class="mb-3">
-                <label for="password" class="form-label">Hasło:</label>
-                <input type="password" class="form-control" id="password" name="password" required>
+                <label for="password" class="form-label">
+                    <i class="fas fa-lock"></i> Hasło:
+                </label>
+                <input type="password" class="form-control" id="password" name="password"
+                       placeholder="Wprowadź hasło" required
+                       th:classappend="${param.error != null} ? 'is-invalid' : ''">
+                <div class="invalid-feedback" th:if="${param.error}">
+                    Sprawdź poprawność hasła
+                </div>
             </div>
 
-            <button type="submit" class="btn btn-primary w-100">Zaloguj się</button>
+            <div class="mb-3 form-check">
+                <input type="checkbox" class="form-check-input" id="rememberMe" name="remember-me">
+                <label class="form-check-label" for="rememberMe">Zapamiętaj mnie</label>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 btn-lg">
+                <i class="fas fa-sign-in-alt"></i> Zaloguj się
+            </button>
         </form>
 
-        <div class="mt-3 text-center">
-            <small>Dane testowe:<br>
-                <strong>user/user</strong> - podstawowy dostęp<br>
-                <strong>admin/admin</strong> - pełny dostęp
+        <div class="mt-4 text-center">
+            <p class="mb-3">Nie masz konta?</p>
+            <a href="/register" class="btn btn-outline-primary w-100">
+                <i class="fas fa-user-plus"></i> Zarejestruj się
+            </a>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="text-center">
+            <small class="text-muted">
+                <strong>Dane testowe:</strong><br>
+                <strong>admin/admin</strong> - pełny dostęp administracyjny<br>
+                <strong>user/user</strong> - podstawowy dostęp użytkownika
             </small>
         </div>
     </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    // Dodanie animacji dla pól formularza
+    document.addEventListener('DOMContentLoaded', function() {
+        const inputs = document.querySelectorAll('input[type="text"], input[type="password"]');
+        inputs.forEach(input => {
+            input.addEventListener('focus', function() {
+                this.parentElement.classList.add('focused');
+            });
+            input.addEventListener('blur', function() {
+                if (this.value === '') {
+                    this.parentElement.classList.remove('focused');
+                }
+            });
+        });
+    });
+</script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\password-generator.html
+----------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Generator Haseł BCrypt</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container mt-5">
+    <h1>🔐 Generator Haseł BCrypt</h1>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <form method="get" action="/generate">
+                <div class="mb-3">
+                    <label for="password" class="form-label">Hasło do zakodowania:</label>
+                    <input type="text" class="form-control" id="password" name="password"
+                           placeholder="Wprowadź hasło" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Generuj BCrypt</button>
+            </form>
+        </div>
+    </div>
+
+    <div th:if="${encodedPassword}" class="card mt-4">
+        <div class="card-body">
+            <h5 class="card-title">Wynik:</h5>
+            <p><strong>Hasło:</strong> <span th:text="${rawPassword}"></span></p>
+            <p><strong>Zakodowane BCrypt:</strong> <code th:text="${encodedPassword}"></code></p>
+            <p><strong>Zapytanie SQL:</strong></p>
+            <pre class="bg-light p-3"><code th:text="${sqlUpdate}"></code></pre>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <h5 class="card-title">Przykładowe hasła:</h5>
+            <ul>
+                <li><a href="/generate?password=admin">admin</a></li>
+                <li><a href="/generate?password=user">user</a></li>
+                <li><a href="/generate?password=testowy">testowy</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\pracownicy.html
+--------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Lista Pracowników</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <div class="navbar-nav">
+            <div sec:authorize="hasRole('ADMIN')">
+                <a class="nav-link" th:href="@{/klienci}">Klienci</a>
+                <a class="nav-link" th:href="@{/pracownicy}">Pracownicy</a>
+            </div>
+        </div>
+
+        <div class="navbar-nav ms-auto">
+            <div sec:authorize="isAuthenticated()">
+                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <h1 class="mb-4 text-center" th:text="${tytul}">Lista Pracowników</h1>
+
+    <div th:if="${pracownicy.empty}" class="alert alert-info text-center">
+        <i class="fas fa-info-circle"></i> Brak pracowników w systemie.
+    </div>
+
+    <div th:if="${!pracownicy.empty}">
+        <table class="table table-striped table-bordered">
+            <thead class="table-dark">
+            <tr>
+                <th>ID</th>
+                <th>Nazwa użytkownika</th>
+                <th>Email</th>
+                <th>Rola</th>
+                <th>Status</th>
+                <th>Data utworzenia</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="pracownik : ${pracownicy}">
+                <td th:text="${pracownik.id}"></td>
+                <td th:text="${pracownik.username}"></td>
+                <td th:text="${pracownik.email}"></td>
+                <td>
+                    <span class="badge bg-success" th:text="${pracownik.role}"></span>
+                </td>
+                <td>
+                    <span th:if="${pracownik.enabled}" class="badge bg-success">Aktywny</span>
+                    <span th:if="${!pracownik.enabled}" class="badge bg-danger">Nieaktywny</span>
+                </td>
+                <td th:text="${pracownik.createdAt}"></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\register.html
+------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Rejestracja - Komis Samochodowy</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .register-container {
+            max-width: 500px;
+            margin: 50px auto;
+            padding: 30px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="/login">Zaloguj</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container">
+    <div class="register-container">
+        <h2 class="text-center mb-4">🚗 Rejestracja</h2>
+
+        <!-- Komunikat sukcesu -->
+        <div th:if="${successMessage}" class="alert alert-success alert-dismissible fade show" role="alert">
+            <span th:text="${successMessage}"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+
+        <!-- Komunikat błędu -->
+        <div th:if="${errorMessage}" class="alert alert-danger alert-dismissible fade show" role="alert">
+            <span th:text="${errorMessage}"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+
+        <form th:action="@{/register}" th:object="${registerRequest}" method="post">
+            <div class="mb-3">
+                <label for="username" class="form-label">Nazwa użytkownika *</label>
+                <input type="text" class="form-control" id="username"
+                       th:field="*{username}" required minlength="3" maxlength="50">
+                <div class="form-text">Minimum 3 znaki</div>
+                <div th:if="${#fields.hasErrors('username')}" class="text-danger">
+                    <span th:errors="*{username}"></span>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label for="email" class="form-label">Email *</label>
+                <input type="email" class="form-control" id="email"
+                       th:field="*{email}" required>
+                <div th:if="${#fields.hasErrors('email')}" class="text-danger">
+                    <span th:errors="*{email}"></span>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label for="password" class="form-label">Hasło *</label>
+                <input type="password" class="form-control" id="password"
+                       th:field="*{password}" required minlength="6">
+                <div class="form-text">Minimum 6 znaków</div>
+                <div th:if="${#fields.hasErrors('password')}" class="text-danger">
+                    <span th:errors="*{password}"></span>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label for="confirmPassword" class="form-label">Potwierdź hasło *</label>
+                <input type="password" class="form-control" id="confirmPassword"
+                       th:field="*{confirmPassword}" required>
+                <div th:if="${#fields.hasErrors('confirmPassword')}" class="text-danger">
+                    <span th:errors="*{confirmPassword}"></span>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 btn-lg">Zarejestruj się</button>
+        </form>
+
+        <div class="mt-3 text-center">
+            <p>Masz już konto? <a href="/login">Zaloguj się</a></p>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 
@@ -1915,6 +3379,578 @@ server:
         </table>
     </div>
 </div>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\admin\change-password.html
+-------------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Zmiana hasła</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="navbar-nav">
+                <a class="nav-link" href="/samochody">Samochody</a>
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
+                        <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
+                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
+                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/admin/users">Użytkownicy</a>
+                <a class="nav-link" href="/admin">Panel Admina</a>
+                <a class="nav-link" href="/">Strona Główna</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0" th:text="${tytul}">Zmiana hasła</h4>
+                </div>
+                <div class="card-body">
+                    <!-- Komunikaty -->
+                    <div th:if="${successMessage}" class="alert alert-success alert-dismissible fade show" role="alert">
+                        <i class="fas fa-check-circle"></i>
+                        <span th:text="${successMessage}"></span>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+
+                    <div th:if="${errorMessage}" class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span th:text="${errorMessage}"></span>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        Zmieniasz hasło dla użytkownika: <strong th:text="${user.username}"></strong>
+                    </div>
+
+                    <form th:action="@{/admin/users/change-password/{id}(id=${user.id})}" method="post">
+                        <div class="mb-3">
+                            <label for="newPassword" class="form-label">Nowe hasło *</label>
+                            <input type="password" class="form-control" id="newPassword"
+                                   name="newPassword" required minlength="6">
+                            <div class="form-text">Minimum 6 znaków</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="confirmPassword" class="form-label">Potwierdź nowe hasło *</label>
+                            <input type="password" class="form-control" id="confirmPassword"
+                                   name="confirmPassword" required minlength="6">
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="/admin/users" class="btn btn-secondary me-md-2">Anuluj</a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-key"></i> Zmień hasło
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Walidacja zgodności haseł
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.querySelector('form');
+        const newPassword = document.getElementById('newPassword');
+        const confirmPassword = document.getElementById('confirmPassword');
+
+        form.addEventListener('submit', function(e) {
+            if (newPassword.value !== confirmPassword.value) {
+                e.preventDefault();
+                alert('Hasła nie są identyczne!');
+                confirmPassword.focus();
+            }
+        });
+    });
+</script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\admin\panel.html
+---------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Panel Administracyjny</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="navbar-nav">
+                <a class="nav-link" href="/samochody">Samochody</a>
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
+                        <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
+                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
+                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/">Strona Główna</a>
+                <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <h1 class="mb-4 text-center"><i class="fas fa-cogs"></i> Panel Administracyjny</h1>
+
+    <div class="row">
+        <!-- Statystyki -->
+        <div class="col-md-4 mb-4">
+            <div class="card text-white bg-primary">
+                <div class="card-body text-center">
+                    <i class="fas fa-users fa-3x mb-3"></i>
+                    <h3 th:text="${totalUsers}">0</h3>
+                    <p class="card-text">Użytkowników</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-4">
+            <div class="card text-white bg-success">
+                <div class="card-body text-center">
+                    <i class="fas fa-car fa-3x mb-3"></i>
+                    <h3 th:text="${totalCars}">0</h3>
+                    <p class="card-text">Samochodów</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-4">
+            <div class="card text-white bg-info">
+                <div class="card-body text-center">
+                    <i class="fas fa-car-side fa-3x mb-3"></i>
+                    <h3 th:text="${availableCars}">0</h3>
+                    <p class="card-text">Dostępnych</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Szybkie akcje -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-bolt"></i> Szybkie akcje</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <a href="/admin/users" class="btn btn-outline-primary w-100">
+                                <i class="fas fa-users-cog"></i><br>
+                                Zarządzaj użytkownikami
+                            </a>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <a href="/samochody/nowy" class="btn btn-outline-success w-100">
+                                <i class="fas fa-car"></i><br>
+                                Dodaj samochód
+                            </a>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <a href="/samochody" class="btn btn-outline-info w-100">
+                                <i class="fas fa-list"></i><br>
+                                Przeglądaj samochody
+                            </a>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <a href="/klienci" class="btn btn-outline-warning w-100">
+                                <i class="fas fa-user-friends"></i><br>
+                                Lista klientów
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\admin\user-form.html
+-------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Formularz użytkownika</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="navbar-nav">
+                <a class="nav-link" href="/samochody">Samochody</a>
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
+                        <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
+                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
+                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/admin/users">Użytkownicy</a>
+                <a class="nav-link" href="/admin">Panel Admina</a>
+                <a class="nav-link" href="/">Strona Główna</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0" th:text="${tytul}">Formularz użytkownika</h4>
+                </div>
+                <div class="card-body">
+                    <!-- Komunikaty -->
+                    <div th:if="${successMessage}" class="alert alert-success alert-dismissible fade show" role="alert">
+                        <i class="fas fa-check-circle"></i>
+                        <span th:text="${successMessage}"></span>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+
+                    <div th:if="${errorMessage}" class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span th:text="${errorMessage}"></span>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+
+                    <!-- Formularz dla nowego użytkownika -->
+                    <form th:if="${user.id == null}" th:action="@{/admin/users/create}"
+                          method="post" th:object="${user}">
+
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Nazwa użytkownika *</label>
+                            <input type="text" class="form-control" id="username"
+                                   th:field="*{username}" required minlength="3" maxlength="50">
+                            <div class="form-text">Minimum 3 znaki</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email *</label>
+                            <input type="email" class="form-control" id="email"
+                                   th:field="*{email}" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Hasło *</label>
+                            <input type="password" class="form-control" id="password"
+                                   name="password" required minlength="6">
+                            <div class="form-text">Minimum 6 znaków</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="role" class="form-label">Rola *</label>
+                            <select class="form-select" id="role" name="role" required>
+                                <option value="">Wybierz rolę</option>
+                                <option th:each="role : ${roles}"
+                                        th:value="${role}"
+                                        th:text="${role}"></option>
+                            </select>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="/admin/users" class="btn btn-secondary me-md-2">Anuluj</a>
+                            <button type="submit" class="btn btn-primary">Utwórz użytkownika</button>
+                        </div>
+                    </form>
+
+                    <!-- Formularz dla edycji użytkownika -->
+                    <form th:if="${user.id != null}" th:action="@{/admin/users/edit/{id}(id=${user.id})}"
+                          method="post" th:object="${user}">
+
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Nazwa użytkownika *</label>
+                            <input type="text" class="form-control" id="username"
+                                   th:field="*{username}" required minlength="3" maxlength="50">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email *</label>
+                            <input type="email" class="form-control" id="email"
+                                   th:field="*{email}" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="newPassword" class="form-label">Nowe hasło (opcjonalnie)</label>
+                            <input type="password" class="form-control" id="newPassword"
+                                   name="newPassword" minlength="6">
+                            <div class="form-text">Zostaw puste, jeśli nie chcesz zmieniać hasła</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="role" class="form-label">Rola *</label>
+                            <select class="form-select" id="role" th:field="*{role}" required>
+                                <option th:each="role : ${roles}"
+                                        th:value="${role}"
+                                        th:text="${role}"
+                                        th:selected="${role == user.role}"></option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="enabled"
+                                   th:field="*{enabled}">
+                            <label class="form-check-label" for="enabled">Konto aktywne</label>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="/admin/users" class="btn btn-secondary me-md-2">Anuluj</a>
+                            <button type="submit" class="btn btn-primary">Zaktualizuj użytkownika</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\admin\users.html
+---------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Zarządzanie użytkownikami</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .actions-column {
+            width: 250px;
+        }
+        .status-badge {
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="navbar-nav">
+                <a class="nav-link" href="/samochody">Samochody</a>
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
+                        <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
+                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
+                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                <a class="nav-link" href="/admin">Panel Admina</a>
+                <a class="nav-link" href="/">Strona Główna</a>
+                <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1><i class="fas fa-users-cog"></i> Zarządzanie użytkownikami</h1>
+        <a href="/admin/users/create" class="btn btn-success">
+            <i class="fas fa-user-plus"></i> Dodaj użytkownika
+        </a>
+    </div>
+
+    <!-- Komunikaty -->
+    <div th:if="${successMessage}" class="alert alert-success alert-dismissible fade show" role="alert">
+        <i class="fas fa-check-circle"></i>
+        <span th:text="${successMessage}"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+
+    <div th:if="${errorMessage}" class="alert alert-danger alert-dismissible fade show" role="alert">
+        <i class="fas fa-exclamation-triangle"></i>
+        <span th:text="${errorMessage}"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="fas fa-list"></i> Lista użytkowników</h5>
+        </div>
+        <div class="card-body">
+            <div th:if="${users.empty}" class="alert alert-info text-center">
+                <i class="fas fa-info-circle"></i> Brak użytkowników w systemie.
+            </div>
+
+            <div th:if="${!users.empty}" class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                    <tr>
+                        <th>ID</th>
+                        <th>Nazwa użytkownika</th>
+                        <th>Email</th>
+                        <th>Rola</th>
+                        <th>Status</th>
+                        <th>Data utworzenia</th>
+                        <th class="actions-column">Akcje</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="user : ${users}">
+                        <td th:text="${user.id}"></td>
+                        <td>
+                            <strong th:text="${user.username}"></strong>
+                        </td>
+                        <td th:text="${user.email}"></td>
+                        <td>
+                            <span th:if="${user.role == 'USER'}" class="badge bg-primary" th:text="${user.role}"></span>
+                            <span th:if="${user.role == 'ADMIN'}" class="badge bg-success" th:text="${user.role}"></span>
+                        </td>
+                        <td>
+                            <span th:if="${user.enabled}" class="badge bg-success status-badge">Aktywny</span>
+                            <span th:if="${!user.enabled}" class="badge bg-danger status-badge">Nieaktywny</span>
+                        </td>
+                        <td>
+                            <small th:text="${#temporals.format(user.createdAt, 'dd.MM.yyyy HH:mm')}"></small>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <!-- Edycja -->
+                                <a th:href="@{/admin/users/edit/{id}(id=${user.id})}"
+                                   class="btn btn-outline-primary" title="Edytuj">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+
+                                <!-- Zmiana hasła -->
+                                <a th:href="@{/admin/users/change-password/{id}(id=${user.id})}"
+                                   class="btn btn-outline-warning" title="Zmień hasło">
+                                    <i class="fas fa-key"></i>
+                                </a>
+
+                                <!-- Aktywacja/Dezaktywacja -->
+                                <form th:action="@{/admin/users/toggle-status/{id}(id=${user.id})}"
+                                      method="post" style="display: inline;">
+                                    <button type="submit"
+                                            th:classappend="${user.enabled} ? 'btn-outline-warning' : 'btn-outline-success'"
+                                            class="btn"
+                                            th:title="${user.enabled} ? 'Dezaktywuj' : 'Aktywuj'">
+                                        <i th:if="${user.enabled}" class="fas fa-user-slash"></i>
+                                        <i th:if="${!user.enabled}" class="fas fa-user-check"></i>
+                                    </button>
+                                </form>
+
+                                <!-- Usuwanie -->
+                                <form th:action="@{/admin/users/delete/{id}(id=${user.id})}"
+                                      method="post" style="display: inline;"
+                                      onsubmit="return confirm('Czy na pewno chcesz usunąć użytkownika ' + [[${user.username}]] + '?')">
+                                    <button type="submit" class="btn btn-outline-danger" title="Usuń">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3">
+        <a href="/admin" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Powrót do panelu admina
+        </a>
+        <a href="/" class="btn btn-outline-secondary ms-2">
+            <i class="fas fa-home"></i> Strona główna
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 
@@ -2022,6 +4058,16 @@ server:
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
         <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <!-- Dodaj tę sekcję do navbar -->
+        <div class="navbar-nav">
+            <!-- Link Klienci tylko dla admina -->
+            <div sec:authorize="hasRole('ADMIN')">
+                <a class="nav-link" th:href="@{/klienci}">Klienci</a>
+                <a class="nav-link" th:href="@{/pracownicy}">Pracownicy</a>
+            </div>
+        </div>
+
         <div class="navbar-nav ms-auto">
             <span class="navbar-text me-3" sec:authentication="name"></span>
             <a class="nav-link" href="/samochody">Powrót do listy</a>
@@ -2297,13 +4343,35 @@ server:
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
         <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
-        <div class="navbar-nav ms-auto">
-            <div sec:authorize="isAuthenticated()">
-                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
-                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="navbar-nav">
+                <a class="nav-link" href="/samochody">Samochody</a>
+                <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        Admin
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
+                        <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
+                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
+                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                    </ul>
+                </div>
             </div>
-            <div sec:authorize="!isAuthenticated()">
-                <a class="nav-link" href="/login">Zaloguj</a>
+
+            <div class="navbar-nav ms-auto">
+                <div sec:authorize="isAuthenticated()">
+                    <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                    <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
+                </div>
+                <div sec:authorize="!isAuthenticated()">
+                    <a class="nav-link" href="/login">Zaloguj</a>
+                </div>
             </div>
         </div>
     </div>
@@ -2443,11 +4511,9 @@ server:
                     <!-- Komunikat dla niezalogowanych użytkowników -->
                     <div sec:authorize="!isAuthenticated()">
                         <div th:if="${samochod.status == 'DOSTEPNY'}">
-                            <button class="btn btn-sm btn-outline-primary"
-                                    data-bs-toggle="modal"
-                                    data-bs-target="#loginInfoModal">
-                                <i class="fas fa-info-circle"></i> Zaloguj się
-                            </button>
+                            <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-info-circle"></i> Szczegóły
+                            </a>
                         </div>
                         <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
                             <span class="badge bg-warning">Zarezerwowany</span>
@@ -2509,7 +4575,7 @@ server:
 -----------------------------------------------------------------
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
-      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security" lang="">
 <head>
     <meta charset="UTF-8">
     <title th:text="${tytul}">Szczegóły Samochodu</title>
@@ -2552,6 +4618,16 @@ server:
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
         <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <!-- Dodaj tę sekcję do navbar -->
+        <div class="navbar-nav">
+            <!-- Link Klienci tylko dla admina -->
+            <div sec:authorize="hasRole('ADMIN')">
+                <a class="nav-link" th:href="@{/klienci}">Klienci</a>
+                <a class="nav-link" th:href="@{/pracownicy}">Pracownicy</a>
+            </div>
+        </div>
+
         <div class="navbar-nav ms-auto">
             <div sec:authorize="isAuthenticated()">
                 <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
@@ -2692,10 +4768,10 @@ server:
 
                     <!-- Komunikat dla niezalogowanych -->
                     <div sec:authorize="!isAuthenticated()">
-                        <div th:if="${samochod.status == 'DOSTEPNY'}">
-                            <a href="/login" class="btn btn-primary btn-lg w-100 mb-2">
-                                <i class="fas fa-sign-in-alt"></i> Zaloguj się, aby zarezerwować
-                            </a>
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i>
+                            Aby móc rezerwować lub kupować ten samochód,
+                            <a href="/login" class="alert-link">zaloguj się</a>.
                         </div>
                         <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
                             <div class="alert alert-warning text-center">
@@ -2734,6 +4810,9 @@ server:
     <div class="mt-4">
         <a href="/samochody" class="btn btn-secondary">
             <i class="fas fa-arrow-left"></i> Powrót do listy samochodów
+        </a>
+        <a href="/" class="btn btn-outline-secondary ms-2">
+            <i class="fas fa-home"></i> Strona główna
         </a>
     </div>
 </div>
