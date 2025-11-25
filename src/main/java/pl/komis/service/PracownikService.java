@@ -1,41 +1,35 @@
 package pl.komis.service;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import pl.komis.model.Pracownik;
 import pl.komis.repository.PracownikRepository;
 
 import java.util.List;
-import java.util.Optional;
+import java.util.NoSuchElementException;
 
 @Service
+@RequiredArgsConstructor
 public class PracownikService {
 
     private final PracownikRepository pracownikRepository;
 
-    public PracownikService(PracownikRepository pracownikRepository) {
-        this.pracownikRepository = pracownikRepository;
-    }
-
-    // Pobierz wszystkich pracowników
-    public List<Pracownik> getAllPracownicy() {
+    public List<Pracownik> findAll() {
         return pracownikRepository.findAll();
     }
 
-    // Pobierz pracownika po ID
-    public Optional<Pracownik> getPracownikById(Long id) {
-        return pracownikRepository.findById(id);
+    public Pracownik getById(Long id) {
+        return pracownikRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Pracownik o ID " + id + " nie istnieje"));
     }
 
-    // Zapisz lub zaktualizuj pracownika
-    public Pracownik savePracownik(Pracownik pracownik) {
+    public Pracownik save(Pracownik pracownik) {
         return pracownikRepository.save(pracownik);
     }
 
-    // Usuń pracownika po ID
-    public void deletePracownik(Long id) {
+    public void remove(Long id) {
         pracownikRepository.deleteById(id);
     }
-
-
 }
+
 

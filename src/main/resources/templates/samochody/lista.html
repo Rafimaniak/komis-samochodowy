@@ -24,9 +24,6 @@
             justify-content: center;
             color: #6c757d;
         }
-        .table-hover tbody tr:hover {
-            background-color: rgba(0, 0, 0, 0.03);
-        }
     </style>
 </head>
 <body>
@@ -41,6 +38,9 @@
         <div class="collapse navbar-collapse" id="navbarNav">
             <div class="navbar-nav">
                 <a class="nav-link" href="/samochody">Samochody</a>
+                <a class="nav-link" href="/search">
+                    <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
+                </a>
                 <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                         Admin
@@ -61,6 +61,7 @@
                 </div>
                 <div sec:authorize="!isAuthenticated()">
                     <a class="nav-link" href="/login">Zaloguj</a>
+                    <a class="nav-link" href="/register">Rejestracja</a>
                 </div>
             </div>
         </div>
@@ -74,21 +75,55 @@
             <a href="/" class="btn btn-secondary">
                 <i class="fas fa-home"></i> Strona Główna
             </a>
-            <!-- Przycisk dodawania tylko dla admina -->
             <a sec:authorize="hasRole('ADMIN')" href="/samochody/nowy" class="btn btn-success ms-2">
                 <i class="fas fa-plus"></i> Dodaj Samochód
             </a>
         </div>
     </div>
 
-    <!-- Informacja o konieczności logowania -->
-    <div sec:authorize="!isAuthenticated()" class="alert alert-info mb-4">
-        <div class="d-flex align-items-center">
-            <i class="fas fa-info-circle fa-2x me-3"></i>
-            <div>
-                <strong>Aby zobaczyć pełne szczegóły samochodów i móc je rezerwować, musisz się zalogować.</strong><br>
-                Po zalogowaniu uzyskasz dostęp do wszystkich parametrów technicznych, zdjęć w wysokiej rozdzielczości oraz możliwość rezerwacji.
-            </div>
+    <!-- Panel wyszukiwania -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="fas fa-search me-2"></i>Szybkie wyszukiwanie</h5>
+        </div>
+        <div class="card-body">
+            <form th:action="@{/samochody}" method="get" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Marka</label>
+                    <select class="form-select" name="marka">
+                        <option value="">Wybierz markę</option>
+                        <option th:each="marka : ${marki}"
+                                th:value="${marka}"
+                                th:selected="${searchMarka == marka}"
+                                th:text="${marka}"></option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Model</label>
+                    <input type="text" class="form-control" name="model"
+                           th:value="${searchModel}" placeholder="Wpisz model">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">Dowolny status</option>
+                        <option value="DOSTEPNY" th:selected="${searchStatus == 'DOSTEPNY'}">Dostępny</option>
+                        <option value="ZAREZERWOWANY" th:selected="${searchStatus == 'ZAREZERWOWANY'}">Zarezerwowany</option>
+                        <option value="SPRZEDANY" th:selected="${searchStatus == 'SPRZEDANY'}">Sprzedany</option>
+                    </select>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-search me-1"></i> Szukaj
+                    </button>
+                    <a href="/samochody" class="btn btn-secondary ms-2">
+                        <i class="fas fa-times me-1"></i> Wyczyść
+                    </a>
+                    <a href="/search" class="btn btn-outline-primary ms-2">
+                        <i class="fas fa-sliders-h me-1"></i> Zaawansowane wyszukiwanie
+                    </a>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -101,7 +136,6 @@
                 <th>Model</th>
                 <th>Rok</th>
                 <th>Cena</th>
-                <th>Kolor</th>
                 <th>Przebieg</th>
                 <th>Status</th>
                 <th>Akcje</th>
@@ -110,106 +144,40 @@
             <tbody>
             <tr th:each="samochod : ${samochody}">
                 <td>
-                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" style="text-decoration: none;">
-                        <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
-                            <img th:src="${samochod.zdjecieUrl}" alt="Zdjęcie samochodu" class="car-image">
-                        </div>
-                        <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image">
-                            <i class="fas fa-car"></i>
-                        </div>
-                    </a>
+                    <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
+                        <img th:src="${samochod.zdjecieUrl}" alt="Zdjęcie samochodu" class="car-image">
+                    </div>
+                    <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image">
+                        <i class="fas fa-car"></i>
+                    </div>
                 </td>
-                <td>
-                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="text-dark fw-bold" style="text-decoration: none;">
-                        <span th:text="${samochod.marka}"></span>
-                    </a>
-                </td>
-                <td>
-                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="text-dark" style="text-decoration: none;">
-                        <span th:text="${samochod.model}"></span>
-                    </a>
-                </td>
+                <td th:text="${samochod.marka}"></td>
+                <td th:text="${samochod.model}"></td>
                 <td th:text="${samochod.rokProdukcji}"></td>
                 <td>
-                    <span th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT')}"></span> zł
+                    <strong th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zł'}"></strong>
                 </td>
-                <td th:text="${samochod.kolor}"></td>
                 <td th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></td>
                 <td>
-                            <span th:if="${samochod.status == 'DOSTEPNY'}"
-                                  class="badge bg-success" th:text="${samochod.status}"></span>
-                    <span th:if="${samochod.status == 'SPRZEDANY'}"
-                          class="badge bg-danger" th:text="${samochod.status}"></span>
-                    <span th:if="${samochod.status == 'ZAREZERWOWANY'}"
-                          class="badge bg-warning" th:text="${samochod.status}"></span>
+                    <span th:if="${samochod.status == 'DOSTEPNY'}" class="badge bg-success">Dostępny</span>
+                    <span th:if="${samochod.status == 'SPRZEDANY'}" class="badge bg-danger">Sprzedany</span>
+                    <span th:if="${samochod.status == 'ZAREZERWOWANY'}" class="badge bg-warning">Zarezerwowany</span>
                 </td>
                 <td>
-                    <!-- Przyciski dla admina -->
-                    <div sec:authorize="hasRole('ADMIN')" class="btn-group-vertical">
-                        <a th:href="@{/samochody/edytuj(id=${samochod.id})}"
-                           class="btn btn-sm btn-warning mb-1">
-                            <i class="fas fa-edit"></i> Edytuj
+                    <div class="btn-group-vertical btn-group-sm">
+                        <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="btn btn-outline-primary mb-1">
+                            <i class="fas fa-eye"></i> Szczegóły
                         </a>
-                        <form th:action="@{/samochody/usun(id=${samochod.id})}"
-                              method="post" style="display: inline;"
-                              onsubmit="return confirm('Czy na pewno chcesz usunąć ten samochód?')">
-                            <button type="submit" class="btn btn-sm btn-danger">
-                                <i class="fas fa-trash"></i> Usuń
-                            </button>
-                        </form>
-                    </div>
-
-                    <!-- Przyciski dla zalogowanych użytkowników (nie adminów) -->
-                    <div sec:authorize="isAuthenticated() and !hasRole('ADMIN')">
-                        <div th:if="${samochod.status == 'DOSTEPNY'}" class="btn-group-vertical">
-                            <form th:action="@{/samochody/zarezerwuj(id=${samochod.id})}"
-                                  method="post" style="display: inline;">
-                                <button type="submit" class="btn btn-sm btn-warning mb-1">
-                                    <i class="fas fa-clock"></i> Zarezerwuj
-                                </button>
-                            </form>
-                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
-                                  method="post" style="display: inline;"
-                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
-                                <button type="submit" class="btn btn-sm btn-success">
-                                    <i class="fas fa-shopping-cart"></i> Kup
-                                </button>
-                            </form>
-                        </div>
-
-                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}" class="btn-group-vertical">
-                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
-                                  method="post" style="display: inline;"
-                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
-                                <button type="submit" class="btn btn-sm btn-success mb-1">
-                                    <i class="fas fa-shopping-cart"></i> Kup
-                                </button>
-                            </form>
-                            <form th:action="@{/samochody/anuluj-rezerwacje(id=${samochod.id})}"
-                                  method="post" style="display: inline;">
-                                <button type="submit" class="btn btn-sm btn-secondary">
-                                    <i class="fas fa-times"></i> Anuluj
-                                </button>
-                            </form>
-                        </div>
-
-                        <div th:if="${samochod.status == 'SPRZEDANY'}">
-                            <span class="badge bg-danger">Sprzedany</span>
-                        </div>
-                    </div>
-
-                    <!-- Komunikat dla niezalogowanych użytkowników -->
-                    <div sec:authorize="!isAuthenticated()">
-                        <div th:if="${samochod.status == 'DOSTEPNY'}">
-                            <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="btn btn-sm btn-outline-primary">
-                                <i class="fas fa-info-circle"></i> Szczegóły
+                        <div sec:authorize="hasRole('ADMIN')">
+                            <a th:href="@{/samochody/edytuj(id=${samochod.id})}" class="btn btn-outline-warning mb-1">
+                                <i class="fas fa-edit"></i> Edytuj
                             </a>
-                        </div>
-                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
-                            <span class="badge bg-warning">Zarezerwowany</span>
-                        </div>
-                        <div th:if="${samochod.status == 'SPRZEDANY'}">
-                            <span class="badge bg-danger">Sprzedany</span>
+                            <form th:action="@{/samochody/usun(id=${samochod.id})}" method="post"
+                                  onsubmit="return confirm('Czy na pewno chcesz usunąć ten samochód?')">
+                                <button type="submit" class="btn btn-outline-danger w-100">
+                                    <i class="fas fa-trash"></i> Usuń
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </td>
@@ -220,39 +188,8 @@
 
     <div th:if="${samochody.empty}" class="alert alert-info text-center">
         <i class="fas fa-car fa-2x mb-3"></i><br>
-        Brak samochodów w bazie danych.
-    </div>
-</div>
-
-<!-- Modal z informacją o konieczności logowania -->
-<div class="modal fade" id="loginInfoModal" tabindex="-1" aria-labelledby="loginInfoModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="loginInfoModalLabel">
-                    <i class="fas fa-info-circle text-primary"></i> Informacja
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <p>Aby zobaczyć pełne szczegóły samochodów i móc je rezerwować, musisz się zalogować.</p>
-                <div class="alert alert-info">
-                    <strong>Po zalogowaniu będziesz mógł:</strong>
-                    <ul class="mb-0 mt-2">
-                        <li>Zobaczyć wszystkie parametry techniczne</li>
-                        <li>Obejrzeć zdjęcia w wysokiej rozdzielczości</li>
-                        <li>Zarezerwować wybrane samochody</li>
-                        <li>Skontaktować się w sprawie zakupu</li>
-                    </ul>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Później</button>
-                <a href="/login" class="btn btn-primary">
-                    <i class="fas fa-sign-in-alt"></i> Przejdź do logowania
-                </a>
-            </div>
-        </div>
+        <span th:if="${hasSearchParams}">Nie znaleziono samochodów spełniających podane kryteria.</span>
+        <span th:if="${not hasSearchParams}">Brak samochodów w bazie danych.</span>
     </div>
 </div>
 

@@ -19,16 +19,73 @@ public class SamochodController {
 
     private final SamochodService samochodService;
 
-    // Widok listy samochodów - dostępne dla wszystkich
+    // Widok listy samochodów z wyszukiwarką
     @GetMapping
-    public String listaSamochodow(Model model) {
-        List<Samochod> samochody = samochodService.findAll();
-        model.addAttribute("samochody", samochody);
-        model.addAttribute("tytul", "Lista Samochodów");
+    public String listaSamochodow(
+            @RequestParam(required = false) String marka,
+            @RequestParam(required = false) String model,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Integer minRok,
+            @RequestParam(required = false) Integer maxRok,
+            @RequestParam(required = false) Integer minPrzebieg,
+            @RequestParam(required = false) Integer maxPrzebieg,
+            @RequestParam(required = false) BigDecimal minCena,
+            @RequestParam(required = false) BigDecimal maxCena,
+            Model modelAttr) {
+
+        List<Samochod> samochody;
+
+        // Sprawdź czy są parametry wyszukiwania (uwzględniając puste stringi)
+        boolean hasSearchParams = (marka != null && !marka.trim().isEmpty()) ||
+                (model != null && !model.trim().isEmpty()) ||
+                (status != null && !status.trim().isEmpty()) ||
+                minRok != null || maxRok != null ||
+                minPrzebieg != null || maxPrzebieg != null ||
+                minCena != null || maxCena != null;
+
+        if (hasSearchParams) {
+            // Użyj zaawansowanego wyszukiwania
+            SamochodService.SearchCriteria criteria = new SamochodService.SearchCriteria();
+            criteria.setMarka(marka);
+            criteria.setModel(model);
+            criteria.setStatus(status);
+            criteria.setMinRok(minRok);
+            criteria.setMaxRok(maxRok);
+            criteria.setMinPrzebieg(minPrzebieg);
+            criteria.setMaxPrzebieg(maxPrzebieg);
+            criteria.setMinCena(minCena);
+            criteria.setMaxCena(maxCena);
+
+            samochody = samochodService.searchCars(criteria);
+
+            // DEBUG: Sprawdź wyniki wyszukiwania
+            System.out.println("DEBUG: Kryteria wyszukiwania: " + criteria);
+            System.out.println("DEBUG: Znaleziono samochodów: " + samochody.size());
+        } else {
+            // Pokaż wszystkie samochody
+            samochody = samochodService.findAll();
+        }
+
+        modelAttr.addAttribute("samochody", samochody);
+        modelAttr.addAttribute("marki", samochodService.findAllMarki());
+        modelAttr.addAttribute("tytul", "Lista Samochodów");
+        modelAttr.addAttribute("hasSearchParams", hasSearchParams);
+
+        // Przekaż parametry wyszukiwania z powrotem do formularza
+        modelAttr.addAttribute("searchMarka", marka);
+        modelAttr.addAttribute("searchModel", model);
+        modelAttr.addAttribute("searchStatus", status);
+        modelAttr.addAttribute("searchMinRok", minRok);
+        modelAttr.addAttribute("searchMaxRok", maxRok);
+        modelAttr.addAttribute("searchMinPrzebieg", minPrzebieg);
+        modelAttr.addAttribute("searchMaxPrzebieg", maxPrzebieg);
+        modelAttr.addAttribute("searchMinCena", minCena);
+        modelAttr.addAttribute("searchMaxCena", maxCena);
+
         return "samochody/lista";
     }
 
-    // Strona szczegółów samochodu - dostępne dla wszystkich
+    // Pozostałe metody pozostają bez zmian...
     @GetMapping("/szczegoly")
     public String szczegolySamochodu(@RequestParam("id") Long id, Model model) {
         Samochod samochod = samochodService.findById(id)

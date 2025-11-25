@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Formularz zakupu</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body>
+<div class="container mt-4">
+
+    <h1 th:text="${zakup.id == null ? 'Dodaj zakup' : 'Edytuj zakup'}"></h1>
+
+    <form th:action="@{${zakup.id == null} ? '/zakupy/dodaj' : '/zakupy/edytuj/' + ${zakup.id}}"
+          th:object="${zakup}" method="post">
+
+        <div class="mb-3">
+            <label class="form-label">Samochód</label>
+            <select class="form-select" th:field="*{samochod}">
+                <option th:each="s : ${samochody}"
+                        th:value="${s}"
+                        th:text="${s.marka + ' ' + s.model}">
+                </option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Klient</label>
+            <select class="form-select" th:field="*{klient}">
+                <option th:each="k : ${klienci}"
+                        th:value="${k}"
+                        th:text="${k.imie + ' ' + k.nazwisko}">
+                </option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Pracownik</label>
+            <select class="form-select" th:field="*{pracownik}">
+                <option th:each="p : ${pracownicy}"
+                        th:value="${p}"
+                        th:text="${p.imie + ' ' + p.nazwisko}">
+                </option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label>Data zakupu</label>
+            <input type="date" class="form-control" th:field="*{dataZakupu}">
+        </div>
+
+        <div class="mb-3">
+            <label>Cena zakupu</label>
+            <input type="number" step="0.01" class="form-control" th:field="*{cenaZakupu}">
+        </div>
+
+        <button type="submit" class="btn btn-success">Zapisz</button>
+        <a th:href="@{/zakupy}" class="btn btn-secondary">Anuluj</a>
+
+    </form>
+</div>
+
+</body>
+</html>

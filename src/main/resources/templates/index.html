@@ -52,6 +52,9 @@
         <div class="collapse navbar-collapse" id="navbarNav">
             <div class="navbar-nav">
                 <a class="nav-link" href="/samochody">Samochody</a>
+                <a class="nav-link" href="/search">
+                    <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
+                </a>
                 <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                         Admin
@@ -61,6 +64,7 @@
                         <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
                         <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
                         <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                        <li><a class="dropdown-item" href="/zakupy">Zakupy</a></li>
                     </ul>
                 </div>
             </div>

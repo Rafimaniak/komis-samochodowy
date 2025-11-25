@@ -1,5 +1,6 @@
 package pl.komis.service;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -28,16 +29,21 @@ public class UserService {
             throw new RuntimeException("Email jest już zajęty");
         }
 
-        user.setPassword(passwordEncoder.encode(rawPassword));
-        user.setEnabled(true);
-        user.setCreatedAt(LocalDateTime.now());
+        String encodedPassword = passwordEncoder.encode(rawPassword);
+        String role = user.getRole() != null ? user.getRole() : "USER";
 
-        // Domyślnie ustaw rolę USER, jeśli nie podano
-        if (user.getRole() == null) {
-            user.setRole("USER");
-        }
+        // Użycie procedury zamiast standardowego save
+        Long newUserId = userRepository.createUser(
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                role,
+                true
+        );
 
-        return userRepository.save(user);
+        // Pobierz utworzonego użytkownika
+        return userRepository.findById(newUserId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia użytkownika"));
     }
 
     public User createUserByAdmin(User user, String rawPassword, String role) {
@@ -48,12 +54,19 @@ public class UserService {
             throw new RuntimeException("Email jest już zajęty");
         }
 
-        user.setPassword(passwordEncoder.encode(rawPassword));
-        user.setEnabled(true);
-        user.setCreatedAt(LocalDateTime.now());
-        user.setRole(role);
+        String encodedPassword = passwordEncoder.encode(rawPassword);
 
-        return userRepository.save(user);
+        // Użycie procedury tworzenia użytkownika
+        Long newUserId = userRepository.createUser(
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                role,
+                true
+        );
+
+        return userRepository.findById(newUserId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia użytkownika"));
     }
 
     public User createUser(User user, String rawPassword) {
@@ -64,16 +77,20 @@ public class UserService {
             throw new RuntimeException("Email jest już zajęty");
         }
 
-        user.setPassword(passwordEncoder.encode(rawPassword));
-        user.setEnabled(true);
-        user.setCreatedAt(LocalDateTime.now());
+        String encodedPassword = passwordEncoder.encode(rawPassword);
+        String role = user.getRole() != null ? user.getRole() : "USER";
 
-        // Domyślnie ustaw rolę USER, jeśli nie podano
-        if (user.getRole() == null) {
-            user.setRole("USER");
-        }
+        // Użycie procedury tworzenia użytkownika
+        Long newUserId = userRepository.createUser(
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                role,
+                true
+        );
 
-        return userRepository.save(user);
+        return userRepository.findById(newUserId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia użytkownika"));
     }
 
     // ==================== METODY ODCZYTU ====================
@@ -122,54 +139,120 @@ public class UserService {
         }
 
         // Zachowaj hasło jeśli nie zostało zmienione
-        if (user.getPassword() == null || user.getPassword().isEmpty()) {
-            user.setPassword(existingUser.getPassword());
+        String password = user.getPassword();
+        if (password == null || password.isEmpty()) {
+            password = existingUser.getPassword();
+        } else {
+            // Jeśli podano nowe hasło, zakoduj je
+            password = passwordEncoder.encode(password);
         }
 
-        // Zachowaj datę utworzenia
-        user.setCreatedAt(existingUser.getCreatedAt());
+        // Użycie procedury aktualizacji
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                password,
+                user.getRole(),
+                user.getEnabled() != null ? user.getEnabled() : true
+        );
 
-        return userRepository.save(user);
+        return userRepository.findById(user.getId())
+                .orElseThrow(() -> new RuntimeException("Błąd podczas aktualizacji użytkownika"));
     }
 
     public User changePassword(Long userId, String newPassword) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setPassword(passwordEncoder.encode(newPassword));
-        return userRepository.save(user);
+        String encodedPassword = passwordEncoder.encode(newPassword);
+
+        // Użycie procedury aktualizacji z nowym hasłem
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                user.getRole(),
+                user.getEnabled()
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas zmiany hasła"));
     }
 
     public User toggleUserStatus(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setEnabled(!user.getEnabled());
-        return userRepository.save(user);
+        boolean newStatus = !user.getEnabled();
+
+        // Użycie procedury aktualizacji statusu
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPassword(),
+                user.getRole(),
+                newStatus
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas zmiany statusu użytkownika"));
     }
 
     public User activateUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setEnabled(true);
-        return userRepository.save(user);
+        // Użycie procedury aktualizacji - aktywacja
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPassword(),
+                user.getRole(),
+                true
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas aktywacji użytkownika"));
     }
 
     public User deactivateUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setEnabled(false);
-        return userRepository.save(user);
+        // Użycie procedury aktualizacji - deaktywacja
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPassword(),
+                user.getRole(),
+                false
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas deaktywacji użytkownika"));
     }
 
     public User changeUserRole(Long userId, String newRole) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setRole(newRole);
-        return userRepository.save(user);
+        // Użycie procedury aktualizacji roli
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPassword(),
+                newRole,
+                user.getEnabled()
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas zmiany roli użytkownika"));
     }
 
     // ==================== METODY USUWANIA ====================
@@ -178,13 +261,15 @@ public class UserService {
         if (!userRepository.existsById(id)) {
             throw new RuntimeException("Użytkownik nie znaleziony");
         }
-        userRepository.deleteById(id);
+        // Użycie procedury usuwania
+        userRepository.deleteUser(id);
     }
 
     public void deleteUserByUsername(String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
-        userRepository.delete(user);
+        // Użycie procedury usuwania
+        userRepository.deleteUser(user.getId());
     }
 
     // ==================== METODY WALIDACJI I SPRAWDZANIA ====================
@@ -291,8 +376,20 @@ public class UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setPassword(passwordEncoder.encode(newPassword));
-        return userRepository.save(user);
+        String encodedPassword = passwordEncoder.encode(newPassword);
+
+        // Użycie procedury aktualizacji hasła
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                user.getRole(),
+                user.getEnabled()
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas resetowania hasła"));
     }
 
     // ==================== METODY RAPORTOWANIA ====================
@@ -308,7 +405,9 @@ public class UserService {
     }
 
     // Klasa pomocnicza dla statystyk
+    @Getter
     public static class UserStatistics {
+        // Gettery
         private final long totalUsers;
         private final long activeUsers;
         private final long inactiveUsers;
@@ -323,11 +422,5 @@ public class UserService {
             this.regularUsers = regularUsers;
         }
 
-        // Gettery
-        public long getTotalUsers() { return totalUsers; }
-        public long getActiveUsers() { return activeUsers; }
-        public long getInactiveUsers() { return inactiveUsers; }
-        public long getAdminUsers() { return adminUsers; }
-        public long getRegularUsers() { return regularUsers; }
     }
 }

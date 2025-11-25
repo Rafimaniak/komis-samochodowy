@@ -1,5 +1,5 @@
 Eksport struktury katalog�w i plik�w
-Wygenerowano: 11/24/2025 03:30:27
+Wygenerowano: 11/25/2025 13:30:21
 
 
 
@@ -113,13 +113,19 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
+                        // Strony publiczne - dostępne bez logowania
                         .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/**",
                                 "/samochody", "/samochody/szczegoly", "/register",
-                                "/generate-password", "/test-passwords").permitAll() // DODAJ TE ŚCIEŻKI
+                                "/generate-password", "/test-passwords",
+                                "/search", "/search/**", "/search/quick", "/search/quick/**").permitAll() // DODANO BRAKUJĄCE ENDPOINTY
+
+                        // Strony admina - wymagają roli ADMIN
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .requestMatchers("/klienci", "/pracownicy").hasRole("ADMIN")
-                        .requestMatchers("/samochody/nowy", "/samochody/edytuj/**", "/samochody/zapisz",
-                                "/samochody/usun/**").hasRole("ADMIN")
+                        .requestMatchers("/samochody/nowy", "/samochody/edytuj/**",
+                                "/samochody/zapisz", "/samochody/usun/**").hasRole("ADMIN")
+
+                        // Wszystkie inne strony wymagają logowania
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
@@ -702,16 +708,73 @@ public class SamochodController {
 
     private final SamochodService samochodService;
 
-    // Widok listy samochodów - dostępne dla wszystkich
+    // Widok listy samochodów z wyszukiwarką
     @GetMapping
-    public String listaSamochodow(Model model) {
-        List<Samochod> samochody = samochodService.findAll();
-        model.addAttribute("samochody", samochody);
-        model.addAttribute("tytul", "Lista Samochodów");
+    public String listaSamochodow(
+            @RequestParam(required = false) String marka,
+            @RequestParam(required = false) String model,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Integer minRok,
+            @RequestParam(required = false) Integer maxRok,
+            @RequestParam(required = false) Integer minPrzebieg,
+            @RequestParam(required = false) Integer maxPrzebieg,
+            @RequestParam(required = false) BigDecimal minCena,
+            @RequestParam(required = false) BigDecimal maxCena,
+            Model modelAttr) {
+
+        List<Samochod> samochody;
+
+        // Sprawdź czy są parametry wyszukiwania (uwzględniając puste stringi)
+        boolean hasSearchParams = (marka != null && !marka.trim().isEmpty()) ||
+                (model != null && !model.trim().isEmpty()) ||
+                (status != null && !status.trim().isEmpty()) ||
+                minRok != null || maxRok != null ||
+                minPrzebieg != null || maxPrzebieg != null ||
+                minCena != null || maxCena != null;
+
+        if (hasSearchParams) {
+            // Użyj zaawansowanego wyszukiwania
+            SamochodService.SearchCriteria criteria = new SamochodService.SearchCriteria();
+            criteria.setMarka(marka);
+            criteria.setModel(model);
+            criteria.setStatus(status);
+            criteria.setMinRok(minRok);
+            criteria.setMaxRok(maxRok);
+            criteria.setMinPrzebieg(minPrzebieg);
+            criteria.setMaxPrzebieg(maxPrzebieg);
+            criteria.setMinCena(minCena);
+            criteria.setMaxCena(maxCena);
+
+            samochody = samochodService.searchCars(criteria);
+
+            // DEBUG: Sprawdź wyniki wyszukiwania
+            System.out.println("DEBUG: Kryteria wyszukiwania: " + criteria);
+            System.out.println("DEBUG: Znaleziono samochodów: " + samochody.size());
+        } else {
+            // Pokaż wszystkie samochody
+            samochody = samochodService.findAll();
+        }
+
+        modelAttr.addAttribute("samochody", samochody);
+        modelAttr.addAttribute("marki", samochodService.findAllMarki());
+        modelAttr.addAttribute("tytul", "Lista Samochodów");
+        modelAttr.addAttribute("hasSearchParams", hasSearchParams);
+
+        // Przekaż parametry wyszukiwania z powrotem do formularza
+        modelAttr.addAttribute("searchMarka", marka);
+        modelAttr.addAttribute("searchModel", model);
+        modelAttr.addAttribute("searchStatus", status);
+        modelAttr.addAttribute("searchMinRok", minRok);
+        modelAttr.addAttribute("searchMaxRok", maxRok);
+        modelAttr.addAttribute("searchMinPrzebieg", minPrzebieg);
+        modelAttr.addAttribute("searchMaxPrzebieg", maxPrzebieg);
+        modelAttr.addAttribute("searchMinCena", minCena);
+        modelAttr.addAttribute("searchMaxCena", maxCena);
+
         return "samochody/lista";
     }
 
-    // Strona szczegółów samochodu - dostępne dla wszystkich
+    // Pozostałe metody pozostają bez zmian...
     @GetMapping("/szczegoly")
     public String szczegolySamochodu(@RequestParam("id") Long id, Model model) {
         Samochod samochod = samochodService.findById(id)
@@ -827,6 +890,134 @@ public class SamochodController {
 }
 
 
+�CIE�KA: src\main\java\pl\komis\controller\SearchController.java
+-------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import pl.komis.model.Samochod;
+import pl.komis.service.SamochodService;
+
+import java.util.List;
+
+@Controller
+@RequestMapping("/search")
+@RequiredArgsConstructor
+public class SearchController {
+
+    private final SamochodService samochodService;
+
+    @GetMapping
+    public String showSearchForm(Model model) {
+        model.addAttribute("searchCriteria", new SamochodService.SearchCriteria());
+        model.addAttribute("marki", samochodService.findAllMarki());
+        model.addAttribute("tytul", "Zaawansowane wyszukiwanie");
+        return "search/form";
+    }
+
+    @PostMapping
+    public String searchCars(@ModelAttribute SamochodService.SearchCriteria criteria, Model model) {
+        List<Samochod> results = samochodService.searchCars(criteria);
+
+        // DEBUG
+        System.out.println("DEBUG Zaawansowane wyszukiwanie:");
+        System.out.println("DEBUG - Marka: " + criteria.getMarka());
+        System.out.println("DEBUG - Model: " + criteria.getModel());
+        System.out.println("DEBUG - Status: " + criteria.getStatus());
+        System.out.println("DEBUG - Min rok: " + criteria.getMinRok());
+        System.out.println("DEBUG - Max rok: " + criteria.getMaxRok());
+        System.out.println("DEBUG - Wyniki: " + results.size() + " samochodów");
+
+        model.addAttribute("searchCriteria", criteria);
+        model.addAttribute("samochody", results);
+        model.addAttribute("marki", samochodService.findAllMarki());
+        model.addAttribute("tytul", "Wyniki wyszukiwania");
+        model.addAttribute("resultsCount", results.size());
+
+        return "search/results";
+    }
+
+    @GetMapping("/quick")
+    public String quickSearch(
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String marka,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String model,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String status,
+            Model modelAttr) {
+
+        List<Samochod> results = samochodService.searchCarsSimple(marka, model, status);
+
+        modelAttr.addAttribute("samochody", results);
+        modelAttr.addAttribute("marki", samochodService.findAllMarki());
+        modelAttr.addAttribute("tytul", "Szybkie wyszukiwanie");
+        modelAttr.addAttribute("resultsCount", results.size());
+        modelAttr.addAttribute("searchMarka", marka);
+        modelAttr.addAttribute("searchModel", model);
+        modelAttr.addAttribute("searchStatus", status);
+
+        return "search/quick-results";
+    }
+}
+
+
+�CIE�KA: src\main\java\pl\komis\controller\StatystykiController.java
+-----------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import pl.komis.service.SamochodService;
+
+import java.util.List;
+
+@Controller
+@RequestMapping("/stats")
+@PreAuthorize("hasRole('ADMIN')")
+@RequiredArgsConstructor
+public class StatystykiController {
+
+    private final SamochodService samochodService;
+
+    @GetMapping
+    public String showStats(Model model) {
+        SamochodService.CarStatistics stats = samochodService.getCarStatistics();
+        List<SamochodService.BrandStatistics> topBrands = samochodService.getTopBrands(10);
+
+        model.addAttribute("stats", stats);
+        model.addAttribute("topBrands", topBrands);
+        model.addAttribute("tytul", "Statystyki samochodów");
+
+        return "stats/car-stats";
+    }
+
+    @GetMapping("/sales")
+    public String salesReport(
+            @RequestParam(defaultValue = "2025") Integer year,
+            @RequestParam(defaultValue = "11") Integer month,
+            Model model) {
+
+        List<SamochodService.MonthlySales> sales = samochodService.getMonthlySalesReport(year, month);
+
+        model.addAttribute("sales", sales);
+        model.addAttribute("year", year);
+        model.addAttribute("month", month);
+        model.addAttribute("tytul", "Raport sprzedaży");
+
+        return "stats/sales-report";
+    }
+}
+
+
 �CIE�KA: src\main\java\pl\komis\controller\StronaController.java
 -------------------------------------------------------------------
 package pl.komis.controller;
@@ -922,6 +1113,74 @@ public class TestController {
         return result.toString();
     }
 }
+
+
+�CIE�KA: src\main\java\pl\komis\controller\ZakupController.java
+------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.*;
+import pl.komis.model.Zakup;
+import pl.komis.service.*;
+
+@Controller
+@RequestMapping("/zakupy")
+@RequiredArgsConstructor
+public class ZakupController {
+
+    private final ZakupService zakupService;
+    private final SamochodService samochodService;
+    private final KlientService klientService;
+    private final PracownikService pracownikService;
+
+    @GetMapping
+    public String listZakupy(Model model) {
+        model.addAttribute("zakupy", zakupService.findAll());
+        model.addAttribute("tytul", "Lista Zakupów");
+        return "zakupy_lista";
+    }
+
+    @GetMapping("/dodaj")
+    public String showAddForm(Model model) {
+        model.addAttribute("zakup", new Zakup());
+        model.addAttribute("samochody", samochodService.findAll());
+        model.addAttribute("klienci", klientService.findAll());
+        model.addAttribute("pracownicy", pracownikService.findAll());
+        return "zakupy_form";
+    }
+
+    @PostMapping("/dodaj")
+    public String addZakup(@ModelAttribute Zakup zakup) {
+        zakupService.save(zakup);
+        return "redirect:/zakupy";
+    }
+
+    @GetMapping("/edytuj/{id}")
+    public String editZakup(@PathVariable Long id, Model model) {
+        model.addAttribute("zakup", zakupService.getById(id));
+        model.addAttribute("samochody", samochodService.findAll());
+        model.addAttribute("klienci", klientService.findAll());
+        model.addAttribute("pracownicy", pracownikService.findAll());
+        return "zakupy_form";
+    }
+
+    @PostMapping("/edytuj/{id}")
+    public String updateZakup(@PathVariable Long id, @ModelAttribute Zakup zakup) {
+        zakup.setId(id);
+        zakupService.save(zakup);
+        return "redirect:/zakupy";
+    }
+
+    @GetMapping("/usun/{id}")
+    public String deleteZakup(@PathVariable Long id) {
+        zakupService.remove(id);
+        return "redirect:/zakupy";
+    }
+}
+
 
 
 �CIE�KA: src\main\java\pl\komis\dto\RegisterRequest.java
@@ -1570,15 +1829,18 @@ package pl.komis.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.query.Procedure;
 import org.springframework.data.repository.query.Param;
 import pl.komis.model.Samochod;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 public interface SamochodRepository extends JpaRepository<Samochod, Long> {
 
-    // Poprawione metody z @Query dla większej kontroli
+    // ==================== PODSTAWOWE METODY WYSZUKIWANIA ====================
+
     @Query("SELECT s FROM Samochod s WHERE LOWER(s.marka) = LOWER(:marka)")
     List<Samochod> findByMarkaIgnoreCase(@Param("marka") String marka);
 
@@ -1591,6 +1853,116 @@ public interface SamochodRepository extends JpaRepository<Samochod, Long> {
     @Query("SELECT s FROM Samochod s WHERE s.cena BETWEEN :minCena AND :maxCena")
     List<Samochod> findByCenaBetween(@Param("minCena") BigDecimal minCena,
                                      @Param("maxCena") BigDecimal maxCena);
+
+    // ==================== PROCEDURY CRUD ====================
+
+    @Procedure(procedureName = "create_car")
+    Long createCar(
+            @Param("p_marka") String marka,
+            @Param("p_model") String model,
+            @Param("p_rok_produkcji") Integer rokProdukcji,
+            @Param("p_przebieg") Integer przebieg,
+            @Param("p_pojemnosc_silnika") Double pojemnoscSilnika,
+            @Param("p_rodzaj_paliwa") String rodzajPaliwa,
+            @Param("p_skrzynia_biegow") String skrzyniaBiegow,
+            @Param("p_kolor") String kolor,
+            @Param("p_cena") BigDecimal cena,
+            @Param("p_status") String status,
+            @Param("p_zdjecie_url") String zdjecieUrl
+    );
+
+    @Procedure(procedureName = "update_car")
+    void updateCar(
+            @Param("p_id") Long id,
+            @Param("p_marka") String marka,
+            @Param("p_model") String model,
+            @Param("p_rok_produkcji") Integer rokProdukcji,
+            @Param("p_przebieg") Integer przebieg,
+            @Param("p_pojemnosc_silnika") Double pojemnoscSilnika,
+            @Param("p_rodzaj_paliwa") String rodzajPaliwa,
+            @Param("p_skrzynia_biegow") String skrzyniaBiegow,
+            @Param("p_kolor") String kolor,
+            @Param("p_cena") BigDecimal cena,
+            @Param("p_status") String status,
+            @Param("p_zdjecie_url") String zdjecieUrl
+    );
+
+    @Procedure(procedureName = "delete_car")
+    void deleteCar(@Param("p_id") Long id);
+
+    // ==================== ZAAWANSOWANE WYSZUKIWANIE - BEZPOŚREDNIE ZAPYTANIE SQL ====================
+
+    @Query(value = "SELECT s.* FROM samochody s " +
+            "WHERE (:p_marka IS NULL OR LOWER(s.marka) = LOWER(:p_marka)) " +
+            "AND (:p_model IS NULL OR LOWER(s.model) = LOWER(:p_model)) " +
+            "AND (:p_min_rok IS NULL OR s.rok_produkcji >= :p_min_rok) " +
+            "AND (:p_max_rok IS NULL OR s.rok_produkcji <= :p_max_rok) " +
+            "AND (:p_min_przebieg IS NULL OR s.przebieg >= :p_min_przebieg) " +
+            "AND (:p_max_przebieg IS NULL OR s.przebieg <= :p_max_przebieg) " +
+            "AND (:p_min_cena IS NULL OR s.cena >= :p_min_cena) " +
+            "AND (:p_max_cena IS NULL OR s.cena <= :p_max_cena) " +
+            "AND (:p_rodzaj_paliwa IS NULL OR s.rodzaj_paliwa = :p_rodzaj_paliwa) " +
+            "AND (:p_status IS NULL OR s.status = :p_status)", nativeQuery = true)
+    List<Samochod> searchCars(
+            @Param("p_marka") String marka,
+            @Param("p_model") String model,
+            @Param("p_min_rok") Integer minRok,
+            @Param("p_max_rok") Integer maxRok,
+            @Param("p_min_przebieg") Integer minPrzebieg,
+            @Param("p_max_przebieg") Integer maxPrzebieg,
+            @Param("p_min_cena") BigDecimal minCena,
+            @Param("p_max_cena") BigDecimal maxCena,
+            @Param("p_rodzaj_paliwa") String rodzajPaliwa,
+            @Param("p_status") String status
+    );
+
+    // ==================== PROSTE WYSZUKIWANIE ====================
+
+    @Query(value = "SELECT s.* FROM samochody s " +
+            "WHERE (:p_marka IS NULL OR LOWER(s.marka) = LOWER(:p_marka)) " +
+            "AND (:p_model IS NULL OR LOWER(s.model) = LOWER(:p_model)) " +
+            "AND (:p_status IS NULL OR s.status = :p_status)", nativeQuery = true)
+    List<Samochod> searchCarsSimple(
+            @Param("p_marka") String marka,
+            @Param("p_model") String model,
+            @Param("p_status") String status
+    );
+
+    // ==================== PROCEDURY OPERACJI BIZNESOWYCH ====================
+
+    @Procedure(procedureName = "reserve_car")
+    Map<String, Object> reserveCar(
+            @Param("p_car_id") Long carId,
+            @Param("p_user_id") Long userId
+    );
+
+    @Procedure(procedureName = "sell_car")
+    Map<String, Object> sellCar(
+            @Param("p_car_id") Long carId,
+            @Param("p_user_id") Long userId,
+            @Param("p_employee_id") Long employeeId,
+            @Param("p_final_price") BigDecimal finalPrice
+    );
+
+    @Procedure(procedureName = "cancel_reservation")
+    Map<String, Object> cancelReservation(@Param("p_car_id") Long carId);
+
+    // ==================== FUNKCJE RAPORTOWANIA I STATYSTYK ====================
+
+    @Query(value = "SELECT * FROM get_available_cars()", nativeQuery = true)
+    List<Object[]> getAvailableCars();
+
+    @Query(value = "SELECT * FROM get_car_stats()", nativeQuery = true)
+    Map<String, Object> getCarStatistics();
+
+    @Query(value = "SELECT * FROM get_top_brands(:limit_count)", nativeQuery = true)
+    List<Object[]> getTopBrands(@Param("limit_count") Integer limitCount);
+
+    @Query(value = "SELECT * FROM get_monthly_sales_report_func(:p_year, :p_month)", nativeQuery = true)
+    List<Object[]> getMonthlySalesReport(
+            @Param("p_year") Integer year,
+            @Param("p_month") Integer month
+    );
 }
 
 
@@ -1644,6 +2016,9 @@ public interface SprzedazRepository extends JpaRepository<Sprzedaz, Long> {
 package pl.komis.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.query.Procedure;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import pl.komis.model.User;
 
@@ -1656,6 +2031,31 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(String email);
     boolean existsByUsername(String username);
     boolean existsByEmail(String email);
+
+    // Wywołanie PROCEDURY tworzenia użytkownika
+    @Procedure(procedureName = "create_user")
+    Long createUser(
+            @Param("p_username") String username,
+            @Param("p_email") String email,
+            @Param("p_password") String password,
+            @Param("p_role") String role,
+            @Param("p_enabled") Boolean enabled
+    );
+
+    // Wywołanie PROCEDURY aktualizacji użytkownika
+    @Procedure(procedureName = "update_user")
+    void updateUser(
+            @Param("p_id") Long id,
+            @Param("p_username") String username,
+            @Param("p_email") String email,
+            @Param("p_password") String password,
+            @Param("p_role") String role,
+            @Param("p_enabled") Boolean enabled
+    );
+
+    // Wywołanie PROCEDURY usuwania użytkownika
+    @Procedure(procedureName = "delete_user")
+    void deleteUser(@Param("p_id") Long id);
 }
 
 
@@ -1889,44 +2289,38 @@ public class KlientService {
 ----------------------------------------------------------------
 package pl.komis.service;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import pl.komis.model.Pracownik;
 import pl.komis.repository.PracownikRepository;
 
 import java.util.List;
-import java.util.Optional;
+import java.util.NoSuchElementException;
 
 @Service
+@RequiredArgsConstructor
 public class PracownikService {
 
     private final PracownikRepository pracownikRepository;
 
-    public PracownikService(PracownikRepository pracownikRepository) {
-        this.pracownikRepository = pracownikRepository;
-    }
-
-    // Pobierz wszystkich pracowników
-    public List<Pracownik> getAllPracownicy() {
+    public List<Pracownik> findAll() {
         return pracownikRepository.findAll();
     }
 
-    // Pobierz pracownika po ID
-    public Optional<Pracownik> getPracownikById(Long id) {
-        return pracownikRepository.findById(id);
+    public Pracownik getById(Long id) {
+        return pracownikRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Pracownik o ID " + id + " nie istnieje"));
     }
 
-    // Zapisz lub zaktualizuj pracownika
-    public Pracownik savePracownik(Pracownik pracownik) {
+    public Pracownik save(Pracownik pracownik) {
         return pracownikRepository.save(pracownik);
     }
 
-    // Usuń pracownika po ID
-    public void deletePracownik(Long id) {
+    public void remove(Long id) {
         pracownikRepository.deleteById(id);
     }
-
-
 }
+
 
 
 
@@ -1996,6 +2390,8 @@ public class PromocjaService {
 ---------------------------------------------------------------
 package pl.komis.service;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -2003,7 +2399,9 @@ import pl.komis.model.Samochod;
 import pl.komis.repository.SamochodRepository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -2013,6 +2411,8 @@ import java.util.stream.Collectors;
 public class SamochodService {
 
     private final SamochodRepository samochodRepository;
+
+    // ==================== PODSTAWOWE OPERACJE CRUD PRZEZ PROCEDURY ====================
 
     @Transactional(readOnly = true)
     public List<Samochod> findAll() {
@@ -2026,13 +2426,196 @@ public class SamochodService {
 
     @Transactional
     public Samochod save(Samochod samochod) {
-        return samochodRepository.save(samochod);
+        // Ustaw domyślne wartości jeśli potrzebne
+        if (samochod.getDataDodania() == null) {
+            samochod.setDataDodania(LocalDate.now());
+        }
+        if (samochod.getRodzajPaliwa() == null) {
+            samochod.setRodzajPaliwa("Benzyna");
+        }
+        if (samochod.getSkrzyniaBiegow() == null) {
+            samochod.setSkrzyniaBiegow("Manualna");
+        }
+        if (samochod.getPojemnoscSilnika() == null) {
+            samochod.setPojemnoscSilnika(2.0);
+        }
+        if (samochod.getStatus() == null) {
+            samochod.setStatus("DOSTEPNY");
+        }
+
+        // Upewnij się, że zdjecieUrl nie jest null
+        String zdjecieUrl = samochod.getZdjecieUrl();
+        if (zdjecieUrl == null) {
+            zdjecieUrl = "";
+        }
+
+        if (samochod.getId() == null) {
+            // Tworzenie nowego samochodu przez procedurę
+            Long newCarId = samochodRepository.createCar(
+                    samochod.getMarka(),
+                    samochod.getModel(),
+                    samochod.getRokProdukcji(),
+                    samochod.getPrzebieg(),
+                    samochod.getPojemnoscSilnika(),
+                    samochod.getRodzajPaliwa(),
+                    samochod.getSkrzyniaBiegow(),
+                    samochod.getKolor(),
+                    samochod.getCena(),
+                    samochod.getStatus(),
+                    zdjecieUrl
+            );
+
+            return samochodRepository.findById(newCarId)
+                    .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia samochodu"));
+        } else {
+            // Aktualizacja istniejącego samochodu przez procedurę
+            samochodRepository.updateCar(
+                    samochod.getId(),
+                    samochod.getMarka(),
+                    samochod.getModel(),
+                    samochod.getRokProdukcji(),
+                    samochod.getPrzebieg(),
+                    samochod.getPojemnoscSilnika(),
+                    samochod.getRodzajPaliwa(),
+                    samochod.getSkrzyniaBiegow(),
+                    samochod.getKolor(),
+                    samochod.getCena(),
+                    samochod.getStatus(),
+                    zdjecieUrl
+            );
+
+            return samochodRepository.findById(samochod.getId())
+                    .orElseThrow(() -> new RuntimeException("Błąd podczas aktualizacji samochodu"));
+        }
     }
 
     @Transactional
     public void delete(Long id) {
-        samochodRepository.deleteById(id);
+        if (!samochodRepository.existsById(id)) {
+            throw new RuntimeException("Samochód nie znaleziony");
+        }
+        // Użycie procedury usuwania
+        samochodRepository.deleteCar(id);
     }
+
+    // ==================== ZAAWANSOWANE WYSZUKIWANIE PRZEZ BEZPOŚREDNIE ZAPYTANIE SQL ====================
+
+    @Transactional(readOnly = true)
+    public List<Samochod> searchCars(SearchCriteria criteria) {
+        // Upewnij się, że puste stringi są traktowane jako null
+        String marka = (criteria.getMarka() != null && !criteria.getMarka().trim().isEmpty()) ? criteria.getMarka() : null;
+        String model = (criteria.getModel() != null && !criteria.getModel().trim().isEmpty()) ? criteria.getModel() : null;
+        String status = (criteria.getStatus() != null && !criteria.getStatus().trim().isEmpty()) ? criteria.getStatus() : null;
+        String rodzajPaliwa = (criteria.getRodzajPaliwa() != null && !criteria.getRodzajPaliwa().trim().isEmpty()) ? criteria.getRodzajPaliwa() : null;
+
+        return samochodRepository.searchCars(
+                marka,
+                model,
+                criteria.getMinRok(),
+                criteria.getMaxRok(),
+                criteria.getMinPrzebieg(),
+                criteria.getMaxPrzebieg(),
+                criteria.getMinCena(),
+                criteria.getMaxCena(),
+                rodzajPaliwa,
+                status
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> searchCarsSimple(String marka, String model, String status) {
+        // Upewnij się, że puste stringi są traktowane jako null
+        String searchMarka = (marka != null && !marka.trim().isEmpty()) ? marka : null;
+        String searchModel = (model != null && !model.trim().isEmpty()) ? model : null;
+        String searchStatus = (status != null && !status.trim().isEmpty()) ? status : null;
+
+        return samochodRepository.searchCarsSimple(searchMarka, searchModel, searchStatus);
+    }
+
+    // ==================== OPERACJE BIZNESOWE PRZEZ PROCEDURY ====================
+
+    @Transactional
+    public Map<String, Object> reserveCar(Long carId, Long userId) {
+        try {
+            return samochodRepository.reserveCar(carId, userId);
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas rezerwacji samochodu: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public Map<String, Object> sellCar(Long carId, Long userId, Long employeeId, BigDecimal finalPrice) {
+        try {
+            return samochodRepository.sellCar(carId, userId, employeeId, finalPrice);
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas sprzedaży samochodu: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public Map<String, Object> cancelReservation(Long carId) {
+        try {
+            return samochodRepository.cancelReservation(carId);
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas anulowania rezerwacji: " + e.getMessage());
+        }
+    }
+
+    // ==================== RAPORTY I STATYSTYKI PRZEZ FUNKCJE ====================
+
+    @Transactional(readOnly = true)
+    public List<Samochod> getAvailableCars() {
+        try {
+            List<Object[]> results = samochodRepository.getAvailableCars();
+            return results.stream()
+                    .map(this::mapToSamochodFromArray)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas pobierania dostępnych samochodów: " + e.getMessage());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public CarStatistics getCarStatistics() {
+        try {
+            Map<String, Object> stats = samochodRepository.getCarStatistics();
+            return new CarStatistics(
+                    ((Number) stats.get("total_cars")).longValue(),
+                    ((Number) stats.get("available_cars")).longValue(),
+                    ((Number) stats.get("sold_cars")).longValue(),
+                    ((Number) stats.get("reserved_cars")).longValue(),
+                    (BigDecimal) stats.get("avg_price")
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas pobierania statystyk: " + e.getMessage());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<BrandStatistics> getTopBrands(Integer limitCount) {
+        try {
+            List<Object[]> results = samochodRepository.getTopBrands(limitCount != null ? limitCount : 5);
+            return results.stream()
+                    .map(this::mapToBrandStatistics)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas pobierania top marek: " + e.getMessage());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<MonthlySales> getMonthlySalesReport(Integer year, Integer month) {
+        try {
+            List<Object[]> results = samochodRepository.getMonthlySalesReport(year, month);
+            return results.stream()
+                    .map(this::mapToMonthlySales)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas pobierania raportu sprzedaży: " + e.getMessage());
+        }
+    }
+
+    // ==================== METODY POMOCNICZE ====================
 
     @Transactional(readOnly = true)
     public List<Samochod> findByMarka(String marka) {
@@ -2060,8 +2643,6 @@ public class SamochodService {
         BigDecimal maxCena = BigDecimal.valueOf(max);
         return samochodRepository.findByCenaBetween(minCena, maxCena);
     }
-
-    // Dodatkowe przydatne metody:
 
     @Transactional(readOnly = true)
     public long count() {
@@ -2097,36 +2678,24 @@ public class SamochodService {
     public Samochod updateStatus(Long id, String newStatus) {
         Samochod samochod = samochodRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-        samochod.setStatus(newStatus);
-        return samochodRepository.save(samochod);
-    }
 
-    @Transactional(readOnly = true)
-    public List<Samochod> findByRokProdukcjiBetween(int minRok, int maxRok) {
-        return samochodRepository.findAll().stream()
-                .filter(s -> s.getRokProdukcji() >= minRok && s.getRokProdukcji() <= maxRok)
-                .collect(Collectors.toList());
-    }
+        samochodRepository.updateCar(
+                samochod.getId(),
+                samochod.getMarka(),
+                samochod.getModel(),
+                samochod.getRokProdukcji(),
+                samochod.getPrzebieg(),
+                samochod.getPojemnoscSilnika(),
+                samochod.getRodzajPaliwa(),
+                samochod.getSkrzyniaBiegow(),
+                samochod.getKolor(),
+                samochod.getCena(),
+                newStatus,
+                samochod.getZdjecieUrl()
+        );
 
-    @Transactional(readOnly = true)
-    public List<Samochod> findByPrzebiegLessThan(int maxPrzebieg) {
-        return samochodRepository.findAll().stream()
-                .filter(s -> s.getPrzebieg() <= maxPrzebieg)
-                .collect(Collectors.toList());
-    }
-
-    @Transactional(readOnly = true)
-    public List<Samochod> findByRodzajPaliwa(String rodzajPaliwa) {
-        return samochodRepository.findAll().stream()
-                .filter(s -> rodzajPaliwa.equalsIgnoreCase(s.getRodzajPaliwa()))
-                .collect(Collectors.toList());
-    }
-
-    @Transactional(readOnly = true)
-    public List<Samochod> findBySkrzyniaBiegow(String skrzyniaBiegow) {
-        return samochodRepository.findAll().stream()
-                .filter(s -> skrzyniaBiegow.equalsIgnoreCase(s.getSkrzyniaBiegow()))
-                .collect(Collectors.toList());
+        return samochodRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas aktualizacji statusu samochodu"));
     }
 
     @Transactional(readOnly = true)
@@ -2137,12 +2706,81 @@ public class SamochodService {
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
-    public List<String> findAllModele() {
-        return samochodRepository.findAll().stream()
-                .map(Samochod::getModel)
-                .distinct()
-                .collect(Collectors.toList());
+    // ==================== METODY MAPUJĄCE ====================
+
+    private Samochod mapToSamochodFromArray(Object[] result) {
+        Samochod samochod = new Samochod();
+        samochod.setId(((Number) result[0]).longValue());
+        samochod.setMarka((String) result[1]);
+        samochod.setModel((String) result[2]);
+        samochod.setRokProdukcji(((Number) result[3]).intValue());
+        samochod.setCena((BigDecimal) result[4]);
+        samochod.setStatus((String) result[5]);
+        return samochod;
+    }
+
+    private BrandStatistics mapToBrandStatistics(Object[] result) {
+        return new BrandStatistics(
+                (String) result[0],
+                ((Number) result[1]).longValue(),
+                (BigDecimal) result[2]
+        );
+    }
+
+    private MonthlySales mapToMonthlySales(Object[] result) {
+        return new MonthlySales(
+                ((java.sql.Date) result[0]).toLocalDate(),
+                (String) result[1],
+                (String) result[2],
+                (BigDecimal) result[3],
+                (String) result[4],
+                (String) result[5]
+        );
+    }
+
+    // ==================== KLASY POMOCNICZE ====================
+
+    @Data
+    public static class SearchCriteria {
+        private String marka;
+        private String model;
+        private Integer minRok;
+        private Integer maxRok;
+        private Integer minPrzebieg;
+        private Integer maxPrzebieg;
+        private BigDecimal minCena;
+        private BigDecimal maxCena;
+        private String rodzajPaliwa;
+        private String status;
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class CarStatistics {
+        private Long totalCars;
+        private Long availableCars;
+        private Long soldCars;
+        private Long reservedCars;
+        private BigDecimal avgPrice;
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class BrandStatistics {
+        private String marka;
+        private Long carCount;
+        private BigDecimal avgPrice;
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class MonthlySales {
+        private LocalDate dataZakupu;
+        private String marka;
+        private String model;
+        private BigDecimal cenaZakupu;
+        private String klient;
+        private String pracownik;
     }
 }
 
@@ -2151,6 +2789,7 @@ public class SamochodService {
 -----------------------------------------------------------
 package pl.komis.service;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -2179,16 +2818,21 @@ public class UserService {
             throw new RuntimeException("Email jest już zajęty");
         }
 
-        user.setPassword(passwordEncoder.encode(rawPassword));
-        user.setEnabled(true);
-        user.setCreatedAt(LocalDateTime.now());
+        String encodedPassword = passwordEncoder.encode(rawPassword);
+        String role = user.getRole() != null ? user.getRole() : "USER";
 
-        // Domyślnie ustaw rolę USER, jeśli nie podano
-        if (user.getRole() == null) {
-            user.setRole("USER");
-        }
+        // Użycie procedury zamiast standardowego save
+        Long newUserId = userRepository.createUser(
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                role,
+                true
+        );
 
-        return userRepository.save(user);
+        // Pobierz utworzonego użytkownika
+        return userRepository.findById(newUserId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia użytkownika"));
     }
 
     public User createUserByAdmin(User user, String rawPassword, String role) {
@@ -2199,12 +2843,19 @@ public class UserService {
             throw new RuntimeException("Email jest już zajęty");
         }
 
-        user.setPassword(passwordEncoder.encode(rawPassword));
-        user.setEnabled(true);
-        user.setCreatedAt(LocalDateTime.now());
-        user.setRole(role);
+        String encodedPassword = passwordEncoder.encode(rawPassword);
 
-        return userRepository.save(user);
+        // Użycie procedury tworzenia użytkownika
+        Long newUserId = userRepository.createUser(
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                role,
+                true
+        );
+
+        return userRepository.findById(newUserId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia użytkownika"));
     }
 
     public User createUser(User user, String rawPassword) {
@@ -2215,16 +2866,20 @@ public class UserService {
             throw new RuntimeException("Email jest już zajęty");
         }
 
-        user.setPassword(passwordEncoder.encode(rawPassword));
-        user.setEnabled(true);
-        user.setCreatedAt(LocalDateTime.now());
+        String encodedPassword = passwordEncoder.encode(rawPassword);
+        String role = user.getRole() != null ? user.getRole() : "USER";
 
-        // Domyślnie ustaw rolę USER, jeśli nie podano
-        if (user.getRole() == null) {
-            user.setRole("USER");
-        }
+        // Użycie procedury tworzenia użytkownika
+        Long newUserId = userRepository.createUser(
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                role,
+                true
+        );
 
-        return userRepository.save(user);
+        return userRepository.findById(newUserId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia użytkownika"));
     }
 
     // ==================== METODY ODCZYTU ====================
@@ -2273,54 +2928,120 @@ public class UserService {
         }
 
         // Zachowaj hasło jeśli nie zostało zmienione
-        if (user.getPassword() == null || user.getPassword().isEmpty()) {
-            user.setPassword(existingUser.getPassword());
+        String password = user.getPassword();
+        if (password == null || password.isEmpty()) {
+            password = existingUser.getPassword();
+        } else {
+            // Jeśli podano nowe hasło, zakoduj je
+            password = passwordEncoder.encode(password);
         }
 
-        // Zachowaj datę utworzenia
-        user.setCreatedAt(existingUser.getCreatedAt());
+        // Użycie procedury aktualizacji
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                password,
+                user.getRole(),
+                user.getEnabled() != null ? user.getEnabled() : true
+        );
 
-        return userRepository.save(user);
+        return userRepository.findById(user.getId())
+                .orElseThrow(() -> new RuntimeException("Błąd podczas aktualizacji użytkownika"));
     }
 
     public User changePassword(Long userId, String newPassword) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setPassword(passwordEncoder.encode(newPassword));
-        return userRepository.save(user);
+        String encodedPassword = passwordEncoder.encode(newPassword);
+
+        // Użycie procedury aktualizacji z nowym hasłem
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                user.getRole(),
+                user.getEnabled()
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas zmiany hasła"));
     }
 
     public User toggleUserStatus(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setEnabled(!user.getEnabled());
-        return userRepository.save(user);
+        boolean newStatus = !user.getEnabled();
+
+        // Użycie procedury aktualizacji statusu
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPassword(),
+                user.getRole(),
+                newStatus
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas zmiany statusu użytkownika"));
     }
 
     public User activateUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setEnabled(true);
-        return userRepository.save(user);
+        // Użycie procedury aktualizacji - aktywacja
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPassword(),
+                user.getRole(),
+                true
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas aktywacji użytkownika"));
     }
 
     public User deactivateUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setEnabled(false);
-        return userRepository.save(user);
+        // Użycie procedury aktualizacji - deaktywacja
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPassword(),
+                user.getRole(),
+                false
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas deaktywacji użytkownika"));
     }
 
     public User changeUserRole(Long userId, String newRole) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setRole(newRole);
-        return userRepository.save(user);
+        // Użycie procedury aktualizacji roli
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPassword(),
+                newRole,
+                user.getEnabled()
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas zmiany roli użytkownika"));
     }
 
     // ==================== METODY USUWANIA ====================
@@ -2329,13 +3050,15 @@ public class UserService {
         if (!userRepository.existsById(id)) {
             throw new RuntimeException("Użytkownik nie znaleziony");
         }
-        userRepository.deleteById(id);
+        // Użycie procedury usuwania
+        userRepository.deleteUser(id);
     }
 
     public void deleteUserByUsername(String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
-        userRepository.delete(user);
+        // Użycie procedury usuwania
+        userRepository.deleteUser(user.getId());
     }
 
     // ==================== METODY WALIDACJI I SPRAWDZANIA ====================
@@ -2442,8 +3165,20 @@ public class UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        user.setPassword(passwordEncoder.encode(newPassword));
-        return userRepository.save(user);
+        String encodedPassword = passwordEncoder.encode(newPassword);
+
+        // Użycie procedury aktualizacji hasła
+        userRepository.updateUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                encodedPassword,
+                user.getRole(),
+                user.getEnabled()
+        );
+
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas resetowania hasła"));
     }
 
     // ==================== METODY RAPORTOWANIA ====================
@@ -2459,7 +3194,9 @@ public class UserService {
     }
 
     // Klasa pomocnicza dla statystyk
+    @Getter
     public static class UserStatistics {
+        // Gettery
         private final long totalUsers;
         private final long activeUsers;
         private final long inactiveUsers;
@@ -2474,12 +3211,6 @@ public class UserService {
             this.regularUsers = regularUsers;
         }
 
-        // Gettery
-        public long getTotalUsers() { return totalUsers; }
-        public long getActiveUsers() { return activeUsers; }
-        public long getInactiveUsers() { return inactiveUsers; }
-        public long getAdminUsers() { return adminUsers; }
-        public long getRegularUsers() { return regularUsers; }
     }
 }
 
@@ -2488,101 +3219,48 @@ public class UserService {
 ------------------------------------------------------------
 package pl.komis.service;
 
-import pl.komis.model.Zakup;
-import pl.komis.model.Samochod;
-import pl.komis.model.Klient;
-import pl.komis.repository.ZakupRepository;
-import pl.komis.repository.SamochodRepository;
-import pl.komis.repository.KlientRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import pl.komis.model.Zakup;
+import pl.komis.repository.ZakupRepository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 
 @Service
+@RequiredArgsConstructor
 public class ZakupService {
 
     private final ZakupRepository zakupRepository;
-    private final SamochodRepository samochodRepository;
-    private final KlientRepository klientRepository;
 
-    public ZakupService(ZakupRepository zakupRepository,
-                        SamochodRepository samochodRepository,
-                        KlientRepository klientRepository) {
-        this.zakupRepository = zakupRepository;
-        this.samochodRepository = samochodRepository;
-        this.klientRepository = klientRepository;
-    }
-
-    // --- Odczyt wszystkich zakupów ---
-    public List<Zakup> getAllZakupy() {
+    public List<Zakup> findAll() {
         return zakupRepository.findAll();
     }
 
-    // --- Odczyt pojedynczego zakupu ---
-    public Zakup getZakupById(Long id) {
+    public Zakup getById(Long id) {
         return zakupRepository.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("Nie znaleziono zakupu o ID: " + id));
+                .orElseThrow(() -> new NoSuchElementException("Zakup o ID " + id + " nie istnieje"));
     }
 
-    // --- Dodawanie nowego zakupu ---
-    public Zakup addZakup(Zakup zakup) {
-        // Walidacja klienta
-        if (zakup.getKlient() == null || zakup.getKlient().getId() == null) {
-            throw new IllegalArgumentException("Zakup musi zawierać poprawnego klienta.");
-        }
-        Klient klient = klientRepository.findById(zakup.getKlient().getId())
-                .orElseThrow(() -> new NoSuchElementException("Nie znaleziono klienta o ID: " + zakup.getKlient().getId()));
-
-        // Walidacja samochodu
-        if (zakup.getSamochod() == null || zakup.getSamochod().getId() == null) {
-            throw new IllegalArgumentException("Zakup musi zawierać poprawny samochód.");
-        }
-        Samochod samochod = samochodRepository.findById(zakup.getSamochod().getId())
-                .orElseThrow(() -> new NoSuchElementException("Nie znaleziono samochodu o ID: " + zakup.getSamochod().getId()));
-
-        // Możemy np. ustawić domyślną cenę z samochodu, jeśli nie podano
-        if (zakup.getCenaZakupu() == null) {
-            zakup.setCenaZakupu(samochod.getCena());
-        }
-
-        zakup.setKlient(klient);
-        zakup.setSamochod(samochod);
-
+    public Zakup save(Zakup zakup) {
         return zakupRepository.save(zakup);
     }
 
-    // --- Aktualizacja istniejącego zakupu ---
-    public Zakup updateZakup(Long id, Zakup updatedZakup) {
-        Zakup istniejący = zakupRepository.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("Nie znaleziono zakupu o ID: " + id));
-
-        if (updatedZakup.getDataZakupu() != null) {
-            istniejący.setDataZakupu(updatedZakup.getDataZakupu());
-        }
-        if (updatedZakup.getCenaZakupu() != null) {
-            istniejący.setCenaZakupu(updatedZakup.getCenaZakupu());
-        }
-        if (updatedZakup.getKlient() != null) {
-            Klient klient = klientRepository.findById(updatedZakup.getKlient().getId())
-                    .orElseThrow(() -> new NoSuchElementException("Nie znaleziono klienta o ID: " + updatedZakup.getKlient().getId()));
-            istniejący.setKlient(klient);
-        }
-        if (updatedZakup.getSamochod() != null) {
-            Samochod samochod = samochodRepository.findById(updatedZakup.getSamochod().getId())
-                    .orElseThrow(() -> new NoSuchElementException("Nie znaleziono samochodu o ID: " + updatedZakup.getSamochod().getId()));
-            istniejący.setSamochod(samochod);
-        }
-
-        return zakupRepository.save(istniejący);
+    public void remove(Long id) {
+        zakupRepository.deleteById(id);
     }
 
-    // --- Usuwanie zakupu ---
-    public void deleteZakup(Long id) {
-        if (!zakupRepository.existsById(id)) {
-            throw new NoSuchElementException("Nie znaleziono zakupu o ID: " + id);
-        }
-        zakupRepository.deleteById(id);
+    public List<Zakup> findByKlientId(Long id) {
+        return zakupRepository.findByKlientId(id);
+    }
+
+    public List<Zakup> findByPracownikId(Long id) {
+        return zakupRepository.findByPracownikId(id);
+    }
+
+    public List<Zakup> findByDateRange(LocalDate od, LocalDate do_) {
+        return zakupRepository.findByDataZakupuBetween(od, do_);
     }
 }
 
@@ -2685,6 +3363,9 @@ server:
         <div class="collapse navbar-collapse" id="navbarNav">
             <div class="navbar-nav">
                 <a class="nav-link" href="/samochody">Samochody</a>
+                <a class="nav-link" href="/search">
+                    <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
+                </a>
                 <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                         Admin
@@ -2694,6 +3375,7 @@ server:
                         <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
                         <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
                         <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                        <li><a class="dropdown-item" href="/zakupy">Zakupy</a></li>
                     </ul>
                 </div>
             </div>
@@ -3383,6 +4065,132 @@ server:
 </html>
 
 
+�CIE�KA: src\main\resources\templates\zakupy_form.html
+---------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Formularz zakupu</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body>
+<div class="container mt-4">
+
+    <h1 th:text="${zakup.id == null ? 'Dodaj zakup' : 'Edytuj zakup'}"></h1>
+
+    <form th:action="@{${zakup.id == null} ? '/zakupy/dodaj' : '/zakupy/edytuj/' + ${zakup.id}}"
+          th:object="${zakup}" method="post">
+
+        <div class="mb-3">
+            <label class="form-label">Samochód</label>
+            <select class="form-select" th:field="*{samochod}">
+                <option th:each="s : ${samochody}"
+                        th:value="${s}"
+                        th:text="${s.marka + ' ' + s.model}">
+                </option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Klient</label>
+            <select class="form-select" th:field="*{klient}">
+                <option th:each="k : ${klienci}"
+                        th:value="${k}"
+                        th:text="${k.imie + ' ' + k.nazwisko}">
+                </option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Pracownik</label>
+            <select class="form-select" th:field="*{pracownik}">
+                <option th:each="p : ${pracownicy}"
+                        th:value="${p}"
+                        th:text="${p.imie + ' ' + p.nazwisko}">
+                </option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label>Data zakupu</label>
+            <input type="date" class="form-control" th:field="*{dataZakupu}">
+        </div>
+
+        <div class="mb-3">
+            <label>Cena zakupu</label>
+            <input type="number" step="0.01" class="form-control" th:field="*{cenaZakupu}">
+        </div>
+
+        <button type="submit" class="btn btn-success">Zapisz</button>
+        <a th:href="@{/zakupy}" class="btn btn-secondary">Anuluj</a>
+
+    </form>
+</div>
+
+</body>
+</html>
+
+
+
+�CIE�KA: src\main\resources\templates\zakupy_lista.html
+----------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Lista Zakupów</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+
+<div class="container mt-4">
+    <h1 class="mb-4 text-center">Lista zakupów</h1>
+
+    <div th:if="${zakupy.empty}" class="alert alert-info text-center">
+        Brak zakupów w systemie.
+    </div>
+
+    <table th:if="${!zakupy.empty}" class="table table-striped table-bordered">
+        <thead class="table-dark">
+        <tr>
+            <th>ID</th>
+            <th>Samochód</th>
+            <th>Klient</th>
+            <th>Pracownik</th>
+            <th>Data zakupu</th>
+            <th>Cena</th>
+            <th>Akcje</th>
+        </tr>
+        </thead>
+
+        <tbody>
+        <tr th:each="z : ${zakupy}">
+            <td th:text="${z.id}"></td>
+            <td th:text="${z.samochod.marka + ' ' + z.samochod.model}"></td>
+            <td th:text="${z.klient.imie + ' ' + z.klient.nazwisko}"></td>
+            <td th:text="${z.pracownik.imie + ' ' + z.pracownik.nazwisko}"></td>
+            <td th:text="${z.dataZakupu}"></td>
+            <td th:text="${z.cenaZakupu}"></td>
+
+            <td>
+                <a th:href="@{'/zakupy/edytuj/' + ${z.id}}" class="btn btn-primary btn-sm">Edytuj</a>
+                <a th:href="@{'/zakupy/usun/' + ${z.id}}" class="btn btn-danger btn-sm"
+                   onclick="return confirm('Na pewno usunąć?');">Usuń</a>
+            </td>
+        </tr>
+        </tbody>
+    </table>
+
+    <a th:href="@{/zakupy/dodaj}" class="btn btn-success mt-3">Dodaj zakup</a>
+</div>
+
+</body>
+</html>
+
+
+
 �CIE�KA: src\main\resources\templates\admin\change-password.html
 -------------------------------------------------------------------
 <!DOCTYPE html>
@@ -3523,6 +4331,9 @@ server:
         <div class="collapse navbar-collapse" id="navbarNav">
             <div class="navbar-nav">
                 <a class="nav-link" href="/samochody">Samochody</a>
+                <a class="nav-link" href="/search">
+                    <i class="fas fa-search me-1"></i> Wyszukiwanie
+                </a>
                 <div class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                         Admin
@@ -3532,6 +4343,7 @@ server:
                         <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
                         <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
                         <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                        <li><a class="dropdown-item" href="/stats"><i class="fas fa-chart-bar me-1"></i> Statystyki</a></li>
                     </ul>
                 </div>
             </div>
@@ -4334,9 +5146,6 @@ server:
             justify-content: center;
             color: #6c757d;
         }
-        .table-hover tbody tr:hover {
-            background-color: rgba(0, 0, 0, 0.03);
-        }
     </style>
 </head>
 <body>
@@ -4351,6 +5160,9 @@ server:
         <div class="collapse navbar-collapse" id="navbarNav">
             <div class="navbar-nav">
                 <a class="nav-link" href="/samochody">Samochody</a>
+                <a class="nav-link" href="/search">
+                    <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
+                </a>
                 <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                         Admin
@@ -4371,6 +5183,7 @@ server:
                 </div>
                 <div sec:authorize="!isAuthenticated()">
                     <a class="nav-link" href="/login">Zaloguj</a>
+                    <a class="nav-link" href="/register">Rejestracja</a>
                 </div>
             </div>
         </div>
@@ -4384,21 +5197,55 @@ server:
             <a href="/" class="btn btn-secondary">
                 <i class="fas fa-home"></i> Strona Główna
             </a>
-            <!-- Przycisk dodawania tylko dla admina -->
             <a sec:authorize="hasRole('ADMIN')" href="/samochody/nowy" class="btn btn-success ms-2">
                 <i class="fas fa-plus"></i> Dodaj Samochód
             </a>
         </div>
     </div>
 
-    <!-- Informacja o konieczności logowania -->
-    <div sec:authorize="!isAuthenticated()" class="alert alert-info mb-4">
-        <div class="d-flex align-items-center">
-            <i class="fas fa-info-circle fa-2x me-3"></i>
-            <div>
-                <strong>Aby zobaczyć pełne szczegóły samochodów i móc je rezerwować, musisz się zalogować.</strong><br>
-                Po zalogowaniu uzyskasz dostęp do wszystkich parametrów technicznych, zdjęć w wysokiej rozdzielczości oraz możliwość rezerwacji.
-            </div>
+    <!-- Panel wyszukiwania -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="fas fa-search me-2"></i>Szybkie wyszukiwanie</h5>
+        </div>
+        <div class="card-body">
+            <form th:action="@{/samochody}" method="get" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Marka</label>
+                    <select class="form-select" name="marka">
+                        <option value="">Wybierz markę</option>
+                        <option th:each="marka : ${marki}"
+                                th:value="${marka}"
+                                th:selected="${searchMarka == marka}"
+                                th:text="${marka}"></option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Model</label>
+                    <input type="text" class="form-control" name="model"
+                           th:value="${searchModel}" placeholder="Wpisz model">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">Dowolny status</option>
+                        <option value="DOSTEPNY" th:selected="${searchStatus == 'DOSTEPNY'}">Dostępny</option>
+                        <option value="ZAREZERWOWANY" th:selected="${searchStatus == 'ZAREZERWOWANY'}">Zarezerwowany</option>
+                        <option value="SPRZEDANY" th:selected="${searchStatus == 'SPRZEDANY'}">Sprzedany</option>
+                    </select>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-search me-1"></i> Szukaj
+                    </button>
+                    <a href="/samochody" class="btn btn-secondary ms-2">
+                        <i class="fas fa-times me-1"></i> Wyczyść
+                    </a>
+                    <a href="/search" class="btn btn-outline-primary ms-2">
+                        <i class="fas fa-sliders-h me-1"></i> Zaawansowane wyszukiwanie
+                    </a>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -4411,7 +5258,6 @@ server:
                 <th>Model</th>
                 <th>Rok</th>
                 <th>Cena</th>
-                <th>Kolor</th>
                 <th>Przebieg</th>
                 <th>Status</th>
                 <th>Akcje</th>
@@ -4420,106 +5266,40 @@ server:
             <tbody>
             <tr th:each="samochod : ${samochody}">
                 <td>
-                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" style="text-decoration: none;">
-                        <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
-                            <img th:src="${samochod.zdjecieUrl}" alt="Zdjęcie samochodu" class="car-image">
-                        </div>
-                        <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image">
-                            <i class="fas fa-car"></i>
-                        </div>
-                    </a>
+                    <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
+                        <img th:src="${samochod.zdjecieUrl}" alt="Zdjęcie samochodu" class="car-image">
+                    </div>
+                    <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image">
+                        <i class="fas fa-car"></i>
+                    </div>
                 </td>
-                <td>
-                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="text-dark fw-bold" style="text-decoration: none;">
-                        <span th:text="${samochod.marka}"></span>
-                    </a>
-                </td>
-                <td>
-                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="text-dark" style="text-decoration: none;">
-                        <span th:text="${samochod.model}"></span>
-                    </a>
-                </td>
+                <td th:text="${samochod.marka}"></td>
+                <td th:text="${samochod.model}"></td>
                 <td th:text="${samochod.rokProdukcji}"></td>
                 <td>
-                    <span th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT')}"></span> zł
+                    <strong th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zł'}"></strong>
                 </td>
-                <td th:text="${samochod.kolor}"></td>
                 <td th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></td>
                 <td>
-                            <span th:if="${samochod.status == 'DOSTEPNY'}"
-                                  class="badge bg-success" th:text="${samochod.status}"></span>
-                    <span th:if="${samochod.status == 'SPRZEDANY'}"
-                          class="badge bg-danger" th:text="${samochod.status}"></span>
-                    <span th:if="${samochod.status == 'ZAREZERWOWANY'}"
-                          class="badge bg-warning" th:text="${samochod.status}"></span>
+                    <span th:if="${samochod.status == 'DOSTEPNY'}" class="badge bg-success">Dostępny</span>
+                    <span th:if="${samochod.status == 'SPRZEDANY'}" class="badge bg-danger">Sprzedany</span>
+                    <span th:if="${samochod.status == 'ZAREZERWOWANY'}" class="badge bg-warning">Zarezerwowany</span>
                 </td>
                 <td>
-                    <!-- Przyciski dla admina -->
-                    <div sec:authorize="hasRole('ADMIN')" class="btn-group-vertical">
-                        <a th:href="@{/samochody/edytuj(id=${samochod.id})}"
-                           class="btn btn-sm btn-warning mb-1">
-                            <i class="fas fa-edit"></i> Edytuj
+                    <div class="btn-group-vertical btn-group-sm">
+                        <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="btn btn-outline-primary mb-1">
+                            <i class="fas fa-eye"></i> Szczegóły
                         </a>
-                        <form th:action="@{/samochody/usun(id=${samochod.id})}"
-                              method="post" style="display: inline;"
-                              onsubmit="return confirm('Czy na pewno chcesz usunąć ten samochód?')">
-                            <button type="submit" class="btn btn-sm btn-danger">
-                                <i class="fas fa-trash"></i> Usuń
-                            </button>
-                        </form>
-                    </div>
-
-                    <!-- Przyciski dla zalogowanych użytkowników (nie adminów) -->
-                    <div sec:authorize="isAuthenticated() and !hasRole('ADMIN')">
-                        <div th:if="${samochod.status == 'DOSTEPNY'}" class="btn-group-vertical">
-                            <form th:action="@{/samochody/zarezerwuj(id=${samochod.id})}"
-                                  method="post" style="display: inline;">
-                                <button type="submit" class="btn btn-sm btn-warning mb-1">
-                                    <i class="fas fa-clock"></i> Zarezerwuj
-                                </button>
-                            </form>
-                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
-                                  method="post" style="display: inline;"
-                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
-                                <button type="submit" class="btn btn-sm btn-success">
-                                    <i class="fas fa-shopping-cart"></i> Kup
-                                </button>
-                            </form>
-                        </div>
-
-                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}" class="btn-group-vertical">
-                            <form th:action="@{/samochody/kup(id=${samochod.id})}"
-                                  method="post" style="display: inline;"
-                                  onsubmit="return confirm('Czy na pewno chcesz kupić ten samochód?')">
-                                <button type="submit" class="btn btn-sm btn-success mb-1">
-                                    <i class="fas fa-shopping-cart"></i> Kup
-                                </button>
-                            </form>
-                            <form th:action="@{/samochody/anuluj-rezerwacje(id=${samochod.id})}"
-                                  method="post" style="display: inline;">
-                                <button type="submit" class="btn btn-sm btn-secondary">
-                                    <i class="fas fa-times"></i> Anuluj
-                                </button>
-                            </form>
-                        </div>
-
-                        <div th:if="${samochod.status == 'SPRZEDANY'}">
-                            <span class="badge bg-danger">Sprzedany</span>
-                        </div>
-                    </div>
-
-                    <!-- Komunikat dla niezalogowanych użytkowników -->
-                    <div sec:authorize="!isAuthenticated()">
-                        <div th:if="${samochod.status == 'DOSTEPNY'}">
-                            <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="btn btn-sm btn-outline-primary">
-                                <i class="fas fa-info-circle"></i> Szczegóły
+                        <div sec:authorize="hasRole('ADMIN')">
+                            <a th:href="@{/samochody/edytuj(id=${samochod.id})}" class="btn btn-outline-warning mb-1">
+                                <i class="fas fa-edit"></i> Edytuj
                             </a>
-                        </div>
-                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
-                            <span class="badge bg-warning">Zarezerwowany</span>
-                        </div>
-                        <div th:if="${samochod.status == 'SPRZEDANY'}">
-                            <span class="badge bg-danger">Sprzedany</span>
+                            <form th:action="@{/samochody/usun(id=${samochod.id})}" method="post"
+                                  onsubmit="return confirm('Czy na pewno chcesz usunąć ten samochód?')">
+                                <button type="submit" class="btn btn-outline-danger w-100">
+                                    <i class="fas fa-trash"></i> Usuń
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </td>
@@ -4530,39 +5310,8 @@ server:
 
     <div th:if="${samochody.empty}" class="alert alert-info text-center">
         <i class="fas fa-car fa-2x mb-3"></i><br>
-        Brak samochodów w bazie danych.
-    </div>
-</div>
-
-<!-- Modal z informacją o konieczności logowania -->
-<div class="modal fade" id="loginInfoModal" tabindex="-1" aria-labelledby="loginInfoModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="loginInfoModalLabel">
-                    <i class="fas fa-info-circle text-primary"></i> Informacja
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <p>Aby zobaczyć pełne szczegóły samochodów i móc je rezerwować, musisz się zalogować.</p>
-                <div class="alert alert-info">
-                    <strong>Po zalogowaniu będziesz mógł:</strong>
-                    <ul class="mb-0 mt-2">
-                        <li>Zobaczyć wszystkie parametry techniczne</li>
-                        <li>Obejrzeć zdjęcia w wysokiej rozdzielczości</li>
-                        <li>Zarezerwować wybrane samochody</li>
-                        <li>Skontaktować się w sprawie zakupu</li>
-                    </ul>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Później</button>
-                <a href="/login" class="btn btn-primary">
-                    <i class="fas fa-sign-in-alt"></i> Przejdź do logowania
-                </a>
-            </div>
-        </div>
+        <span th:if="${hasSearchParams}">Nie znaleziono samochodów spełniających podane kryteria.</span>
+        <span th:if="${not hasSearchParams}">Brak samochodów w bazie danych.</span>
     </div>
 </div>
 
@@ -4813,6 +5562,510 @@ server:
         </a>
         <a href="/" class="btn btn-outline-secondary ms-2">
             <i class="fas fa-home"></i> Strona główna
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\search\form.html
+---------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Zaawansowane wyszukiwanie</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🏁 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="/samochody">Lista samochodów</a>
+            <a class="nav-link" href="/">Strona główna</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0"><i class="fas fa-search me-2"></i>Zaawansowane wyszukiwanie samochodów</h4>
+                </div>
+                <div class="card-body">
+                    <form th:action="@{/search}" th:object="${searchCriteria}" method="post">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="marka" class="form-label">Marka</label>
+                                <select class="form-select" id="marka" th:field="*{marka}">
+                                    <option value="">Wybierz markę</option>
+                                    <option th:each="marka : ${marki}"
+                                            th:value="${marka}"
+                                            th:text="${marka}"></option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="model" class="form-label">Model</label>
+                                <input type="text" class="form-control" id="model" th:field="*{model}"
+                                       placeholder="Wpisz model">
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="minRok" class="form-label">Rok produkcji od</label>
+                                <input type="number" class="form-control" id="minRok" th:field="*{minRok}"
+                                       min="1990" max="2025" placeholder="1990">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="maxRok" class="form-label">Rok produkcji do</label>
+                                <input type="number" class="form-control" id="maxRok" th:field="*{maxRok}"
+                                       min="1990" max="2025" placeholder="2025">
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="minPrzebieg" class="form-label">Przebieg od (km)</label>
+                                <input type="number" class="form-control" id="minPrzebieg" th:field="*{minPrzebieg}"
+                                       min="0" placeholder="0">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="maxPrzebieg" class="form-label">Przebieg do (km)</label>
+                                <input type="number" class="form-control" id="maxPrzebieg" th:field="*{maxPrzebieg}"
+                                       min="0" placeholder="500000">
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="minCena" class="form-label">Cena od (zł)</label>
+                                <input type="number" class="form-control" id="minCena" th:field="*{minCena}"
+                                       min="0" step="1000" placeholder="0">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="maxCena" class="form-label">Cena do (zł)</label>
+                                <input type="number" class="form-control" id="maxCena" th:field="*{maxCena}"
+                                       min="0" step="1000" placeholder="500000">
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="rodzajPaliwa" class="form-label">Rodzaj paliwa</label>
+                                <select class="form-select" id="rodzajPaliwa" th:field="*{rodzajPaliwa}">
+                                    <option value="">Dowolny</option>
+                                    <option value="Benzyna">Benzyna</option>
+                                    <option value="Diesel">Diesel</option>
+                                    <option value="Hybryda">Hybryda</option>
+                                    <option value="Elektryczny">Elektryczny</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="status" class="form-label">Status</label>
+                                <select class="form-select" id="status" th:field="*{status}">
+                                    <option value="">Dowolny</option>
+                                    <option value="DOSTEPNY">Dostępny</option>
+                                    <option value="ZAREZERWOWANY">Zarezerwowany</option>
+                                    <option value="SPRZEDANY">Sprzedany</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="/samochody" class="btn btn-secondary me-md-2">Anuluj</a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-search me-1"></i> Szukaj
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Szybkie wyszukiwanie -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-bolt me-2"></i>Szybkie wyszukiwanie</h5>
+                </div>
+                <div class="card-body">
+                    <form th:action="@{/search/quick}" method="get" class="row g-3">
+                        <div class="col-md-4">
+                            <select class="form-select" name="marka">
+                                <option value="">Wybierz markę</option>
+                                <option th:each="marka : ${marki}"
+                                        th:value="${marka}"
+                                        th:text="${marka}"></option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <input type="text" class="form-control" name="model" placeholder="Model">
+                        </div>
+                        <div class="col-md-4">
+                            <select class="form-select" name="status">
+                                <option value="">Dowolny status</option>
+                                <option value="DOSTEPNY">Dostępny</option>
+                                <option value="ZAREZERWOWANY">Zarezerwowany</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-outline-primary w-100">
+                                <i class="fas fa-search me-1"></i> Szybkie wyszukiwanie
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\search\results.html
+------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Wyniki wyszukiwania - Komis</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .car-image {
+            width: 80px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 5px;
+        }
+        .no-image {
+            width: 80px;
+            height: 60px;
+            background-color: #f8f9fa;
+            border: 1px dashed #dee2e6;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-size: 0.8rem;
+        }
+        .search-criteria {
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+        }
+        .login-required {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="navbar-nav">
+                <a class="nav-link" href="/samochody">Samochody</a>
+                <a class="nav-link" href="/search">
+                    <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
+                </a>
+            </div>
+
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/login">Zaloguj</a>
+                <a class="nav-link" href="/register">Rejestracja</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1><i class="fas fa-search me-2"></i> Wyniki wyszukiwania</h1>
+        <div>
+            <a href="/search" class="btn btn-primary">
+                <i class="fas fa-arrow-left me-1"></i> Nowe wyszukiwanie
+            </a>
+            <a href="/samochody" class="btn btn-secondary ms-2">
+                <i class="fas fa-list me-1"></i> Wszystkie samochody
+            </a>
+        </div>
+    </div>
+
+    <!-- Informacja o konieczności logowania -->
+    <div class="alert alert-warning login-required mb-4">
+        <i class="fas fa-info-circle me-2"></i>
+        <strong>Aby rezerwować i kupować samochody, musisz się zalogować.</strong>
+        <a href="/login" class="alert-link ms-2">Zaloguj się teraz</a>
+    </div>
+
+    <!-- Podsumowanie kryteriów wyszukiwania -->
+    <div class="card search-criteria mb-4">
+        <div class="card-body">
+            <h5 class="card-title"><i class="fas fa-filter me-2"></i>Kryteria wyszukiwania</h5>
+            <div class="row">
+                <div class="col-md-6">
+                    <small class="text-muted">Znaleziono: <strong th:text="${resultsCount}"></strong> samochodów</small>
+                </div>
+                <div class="col-md-6 text-end">
+                    <small class="text-muted">
+                        <span th:if="${searchCriteria.marka}">Marka: <strong th:text="${searchCriteria.marka}"></strong></span>
+                        <span th:if="${searchCriteria.model}">, Model: <strong th:text="${searchCriteria.model}"></strong></span>
+                        <span th:if="${searchCriteria.status}">, Status: <strong th:text="${searchCriteria.status}"></strong></span>
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div th:if="${samochody.empty}" class="alert alert-info text-center">
+        <i class="fas fa-search fa-2x mb-3"></i><br>
+        <h4>Nie znaleziono samochodów spełniających podane kryteria</h4>
+        <p class="mb-0">Spróbuj zmienić kryteria wyszukiwania lub <a href="/samochody" class="alert-link">przejdź do wszystkich samochodów</a></p>
+    </div>
+
+    <div th:if="${!samochody.empty}" class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+            <tr>
+                <th>Zdjęcie</th>
+                <th>Marka</th>
+                <th>Model</th>
+                <th>Rok</th>
+                <th>Przebieg</th>
+                <th>Cena</th>
+                <th>Paliwo</th>
+                <th>Status</th>
+                <th>Akcje</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="samochod : ${samochody}">
+                <!-- Zdjęcie -->
+                <td>
+                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" style="text-decoration: none;">
+                        <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
+                            <img th:src="${samochod.zdjecieUrl}"
+                                 th:alt="${samochod.marka + ' ' + samochod.model}"
+                                 class="car-image">
+                        </div>
+                        <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image">
+                            <i class="fas fa-car"></i>
+                        </div>
+                    </a>
+                </td>
+
+                <!-- Marka -->
+                <td>
+                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="text-dark fw-bold" style="text-decoration: none;">
+                        <span th:text="${samochod.marka}"></span>
+                    </a>
+                </td>
+
+                <!-- Model -->
+                <td th:text="${samochod.model}"></td>
+
+                <!-- Rok -->
+                <td th:text="${samochod.rokProdukcji}"></td>
+
+                <!-- Przebieg -->
+                <td th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></td>
+
+                <!-- Cena -->
+                <td>
+                    <strong class="text-success"
+                            th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zł'}">
+                    </strong>
+                </td>
+
+                <!-- Paliwo -->
+                <td>
+                    <span th:if="${samochod.rodzajPaliwa}"
+                          class="badge bg-info"
+                          th:text="${samochod.rodzajPaliwa}">
+                    </span>
+                    <span th:if="${!samochod.rodzajPaliwa}" class="text-muted">-</span>
+                </td>
+
+                <!-- Status -->
+                <td>
+                    <span th:if="${samochod.status == 'DOSTEPNY'}" class="badge bg-success">Dostępny</span>
+                    <span th:if="${samochod.status == 'SPRZEDANY'}" class="badge bg-danger">Sprzedany</span>
+                    <span th:if="${samochod.status == 'ZAREZERWOWANY'}" class="badge bg-warning">Zarezerwowany</span>
+                </td>
+
+                <!-- Akcje -->
+                <td>
+                    <div class="btn-group-vertical btn-group-sm">
+                        <!-- Przycisk szczegółów - dostępny dla wszystkich -->
+                        <a th:href="@{/samochody/szczegoly(id=${samochod.id})}"
+                           class="btn btn-outline-primary mb-1">
+                            <i class="fas fa-eye"></i> Szczegóły
+                        </a>
+
+                        <!-- Informacja o konieczności logowania dla akcji -->
+                        <div th:if="${samochod.status == 'DOSTEPNY'}">
+                            <a href="/login" class="btn btn-outline-warning btn-sm w-100 mb-1">
+                                <i class="fas fa-clock"></i> Zaloguj się aby rezerwować
+                            </a>
+                        </div>
+                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
+                            <span class="badge bg-warning">Zarezerwowany</span>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Przyciski nawigacyjne -->
+    <div class="mt-4">
+        <a href="/search" class="btn btn-primary">
+            <i class="fas fa-search me-1"></i> Nowe wyszukiwanie
+        </a>
+        <a href="/samochody" class="btn btn-outline-secondary ms-2">
+            <i class="fas fa-list me-1"></i> Wszystkie samochody
+        </a>
+        <a href="/" class="btn btn-outline-secondary ms-2">
+            <i class="fas fa-home me-1"></i> Strona główna
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: src\main\resources\templates\stats\car-stats.html
+-------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${tytul}">Statystyki samochodów</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🏁 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="/admin">Panel Admina</a>
+            <a class="nav-link" href="/">Strona główna</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <h1 class="mb-4"><i class="fas fa-chart-bar me-2"></i>Statystyki samochodów</h1>
+
+    <!-- Statystyki ogólne -->
+    <div class="row mb-4">
+        <div class="col-md-3 mb-3">
+            <div class="card text-white bg-primary">
+                <div class="card-body text-center">
+                    <i class="fas fa-car fa-2x mb-2"></i>
+                    <h3 th:text="${stats.totalCars}">0</h3>
+                    <p class="card-text">Wszystkich samochodów</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-white bg-success">
+                <div class="card-body text-center">
+                    <i class="fas fa-check-circle fa-2x mb-2"></i>
+                    <h3 th:text="${stats.availableCars}">0</h3>
+                    <p class="card-text">Dostępnych</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-white bg-warning">
+                <div class="card-body text-center">
+                    <i class="fas fa-clock fa-2x mb-2"></i>
+                    <h3 th:text="${stats.reservedCars}">0</h3>
+                    <p class="card-text">Zarezerwowanych</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-white bg-danger">
+                <div class="card-body text-center">
+                    <i class="fas fa-shopping-cart fa-2x mb-2"></i>
+                    <h3 th:text="${stats.soldCars}">0</h3>
+                    <p class="card-text">Sprzedanych</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Średnia cena -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h4 class="text-success">
+                        <i class="fas fa-chart-line me-2"></i>
+                        Średnia cena:
+                        <span th:text="${#numbers.formatDecimal(stats.avgPrice, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                    </h4>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top marki -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="fas fa-trophy me-2"></i>Najpopularniejsze marki</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                    <tr>
+                        <th>Marka</th>
+                        <th>Liczba samochodów</th>
+                        <th>Średnia cena</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="brand : ${topBrands}">
+                        <td th:text="${brand.marka}"></td>
+                        <td th:text="${brand.carCount}"></td>
+                        <td th:text="${#numbers.formatDecimal(brand.avgPrice, 0, 'COMMA', 2, 'POINT') + ' zł'}"></td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Linki do innych raportów -->
+    <div class="mt-4">
+        <a href="/stats/sales" class="btn btn-outline-primary">
+            <i class="fas fa-file-invoice-dollar me-1"></i> Raport sprzedaży
+        </a>
+        <a href="/admin" class="btn btn-secondary ms-2">
+            <i class="fas fa-arrow-left me-1"></i> Powrót do panelu
         </a>
     </div>
 </div>

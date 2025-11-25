@@ -1,5 +1,7 @@
 package pl.komis.service;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -7,7 +9,9 @@ import pl.komis.model.Samochod;
 import pl.komis.repository.SamochodRepository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -17,6 +21,8 @@ import java.util.stream.Collectors;
 public class SamochodService {
 
     private final SamochodRepository samochodRepository;
+
+    // ==================== PODSTAWOWE OPERACJE CRUD PRZEZ PROCEDURY ====================
 
     @Transactional(readOnly = true)
     public List<Samochod> findAll() {
@@ -30,13 +36,196 @@ public class SamochodService {
 
     @Transactional
     public Samochod save(Samochod samochod) {
-        return samochodRepository.save(samochod);
+        // Ustaw domyślne wartości jeśli potrzebne
+        if (samochod.getDataDodania() == null) {
+            samochod.setDataDodania(LocalDate.now());
+        }
+        if (samochod.getRodzajPaliwa() == null) {
+            samochod.setRodzajPaliwa("Benzyna");
+        }
+        if (samochod.getSkrzyniaBiegow() == null) {
+            samochod.setSkrzyniaBiegow("Manualna");
+        }
+        if (samochod.getPojemnoscSilnika() == null) {
+            samochod.setPojemnoscSilnika(2.0);
+        }
+        if (samochod.getStatus() == null) {
+            samochod.setStatus("DOSTEPNY");
+        }
+
+        // Upewnij się, że zdjecieUrl nie jest null
+        String zdjecieUrl = samochod.getZdjecieUrl();
+        if (zdjecieUrl == null) {
+            zdjecieUrl = "";
+        }
+
+        if (samochod.getId() == null) {
+            // Tworzenie nowego samochodu przez procedurę
+            Long newCarId = samochodRepository.createCar(
+                    samochod.getMarka(),
+                    samochod.getModel(),
+                    samochod.getRokProdukcji(),
+                    samochod.getPrzebieg(),
+                    samochod.getPojemnoscSilnika(),
+                    samochod.getRodzajPaliwa(),
+                    samochod.getSkrzyniaBiegow(),
+                    samochod.getKolor(),
+                    samochod.getCena(),
+                    samochod.getStatus(),
+                    zdjecieUrl
+            );
+
+            return samochodRepository.findById(newCarId)
+                    .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia samochodu"));
+        } else {
+            // Aktualizacja istniejącego samochodu przez procedurę
+            samochodRepository.updateCar(
+                    samochod.getId(),
+                    samochod.getMarka(),
+                    samochod.getModel(),
+                    samochod.getRokProdukcji(),
+                    samochod.getPrzebieg(),
+                    samochod.getPojemnoscSilnika(),
+                    samochod.getRodzajPaliwa(),
+                    samochod.getSkrzyniaBiegow(),
+                    samochod.getKolor(),
+                    samochod.getCena(),
+                    samochod.getStatus(),
+                    zdjecieUrl
+            );
+
+            return samochodRepository.findById(samochod.getId())
+                    .orElseThrow(() -> new RuntimeException("Błąd podczas aktualizacji samochodu"));
+        }
     }
 
     @Transactional
     public void delete(Long id) {
-        samochodRepository.deleteById(id);
+        if (!samochodRepository.existsById(id)) {
+            throw new RuntimeException("Samochód nie znaleziony");
+        }
+        // Użycie procedury usuwania
+        samochodRepository.deleteCar(id);
     }
+
+    // ==================== ZAAWANSOWANE WYSZUKIWANIE PRZEZ BEZPOŚREDNIE ZAPYTANIE SQL ====================
+
+    @Transactional(readOnly = true)
+    public List<Samochod> searchCars(SearchCriteria criteria) {
+        // Upewnij się, że puste stringi są traktowane jako null
+        String marka = (criteria.getMarka() != null && !criteria.getMarka().trim().isEmpty()) ? criteria.getMarka() : null;
+        String model = (criteria.getModel() != null && !criteria.getModel().trim().isEmpty()) ? criteria.getModel() : null;
+        String status = (criteria.getStatus() != null && !criteria.getStatus().trim().isEmpty()) ? criteria.getStatus() : null;
+        String rodzajPaliwa = (criteria.getRodzajPaliwa() != null && !criteria.getRodzajPaliwa().trim().isEmpty()) ? criteria.getRodzajPaliwa() : null;
+
+        return samochodRepository.searchCars(
+                marka,
+                model,
+                criteria.getMinRok(),
+                criteria.getMaxRok(),
+                criteria.getMinPrzebieg(),
+                criteria.getMaxPrzebieg(),
+                criteria.getMinCena(),
+                criteria.getMaxCena(),
+                rodzajPaliwa,
+                status
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<Samochod> searchCarsSimple(String marka, String model, String status) {
+        // Upewnij się, że puste stringi są traktowane jako null
+        String searchMarka = (marka != null && !marka.trim().isEmpty()) ? marka : null;
+        String searchModel = (model != null && !model.trim().isEmpty()) ? model : null;
+        String searchStatus = (status != null && !status.trim().isEmpty()) ? status : null;
+
+        return samochodRepository.searchCarsSimple(searchMarka, searchModel, searchStatus);
+    }
+
+    // ==================== OPERACJE BIZNESOWE PRZEZ PROCEDURY ====================
+
+    @Transactional
+    public Map<String, Object> reserveCar(Long carId, Long userId) {
+        try {
+            return samochodRepository.reserveCar(carId, userId);
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas rezerwacji samochodu: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public Map<String, Object> sellCar(Long carId, Long userId, Long employeeId, BigDecimal finalPrice) {
+        try {
+            return samochodRepository.sellCar(carId, userId, employeeId, finalPrice);
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas sprzedaży samochodu: " + e.getMessage());
+        }
+    }
+
+    @Transactional
+    public Map<String, Object> cancelReservation(Long carId) {
+        try {
+            return samochodRepository.cancelReservation(carId);
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas anulowania rezerwacji: " + e.getMessage());
+        }
+    }
+
+    // ==================== RAPORTY I STATYSTYKI PRZEZ FUNKCJE ====================
+
+    @Transactional(readOnly = true)
+    public List<Samochod> getAvailableCars() {
+        try {
+            List<Object[]> results = samochodRepository.getAvailableCars();
+            return results.stream()
+                    .map(this::mapToSamochodFromArray)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas pobierania dostępnych samochodów: " + e.getMessage());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public CarStatistics getCarStatistics() {
+        try {
+            Map<String, Object> stats = samochodRepository.getCarStatistics();
+            return new CarStatistics(
+                    ((Number) stats.get("total_cars")).longValue(),
+                    ((Number) stats.get("available_cars")).longValue(),
+                    ((Number) stats.get("sold_cars")).longValue(),
+                    ((Number) stats.get("reserved_cars")).longValue(),
+                    (BigDecimal) stats.get("avg_price")
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas pobierania statystyk: " + e.getMessage());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<BrandStatistics> getTopBrands(Integer limitCount) {
+        try {
+            List<Object[]> results = samochodRepository.getTopBrands(limitCount != null ? limitCount : 5);
+            return results.stream()
+                    .map(this::mapToBrandStatistics)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas pobierania top marek: " + e.getMessage());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<MonthlySales> getMonthlySalesReport(Integer year, Integer month) {
+        try {
+            List<Object[]> results = samochodRepository.getMonthlySalesReport(year, month);
+            return results.stream()
+                    .map(this::mapToMonthlySales)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas pobierania raportu sprzedaży: " + e.getMessage());
+        }
+    }
+
+    // ==================== METODY POMOCNICZE ====================
 
     @Transactional(readOnly = true)
     public List<Samochod> findByMarka(String marka) {
@@ -64,8 +253,6 @@ public class SamochodService {
         BigDecimal maxCena = BigDecimal.valueOf(max);
         return samochodRepository.findByCenaBetween(minCena, maxCena);
     }
-
-    // Dodatkowe przydatne metody:
 
     @Transactional(readOnly = true)
     public long count() {
@@ -101,36 +288,24 @@ public class SamochodService {
     public Samochod updateStatus(Long id, String newStatus) {
         Samochod samochod = samochodRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-        samochod.setStatus(newStatus);
-        return samochodRepository.save(samochod);
-    }
 
-    @Transactional(readOnly = true)
-    public List<Samochod> findByRokProdukcjiBetween(int minRok, int maxRok) {
-        return samochodRepository.findAll().stream()
-                .filter(s -> s.getRokProdukcji() >= minRok && s.getRokProdukcji() <= maxRok)
-                .collect(Collectors.toList());
-    }
+        samochodRepository.updateCar(
+                samochod.getId(),
+                samochod.getMarka(),
+                samochod.getModel(),
+                samochod.getRokProdukcji(),
+                samochod.getPrzebieg(),
+                samochod.getPojemnoscSilnika(),
+                samochod.getRodzajPaliwa(),
+                samochod.getSkrzyniaBiegow(),
+                samochod.getKolor(),
+                samochod.getCena(),
+                newStatus,
+                samochod.getZdjecieUrl()
+        );
 
-    @Transactional(readOnly = true)
-    public List<Samochod> findByPrzebiegLessThan(int maxPrzebieg) {
-        return samochodRepository.findAll().stream()
-                .filter(s -> s.getPrzebieg() <= maxPrzebieg)
-                .collect(Collectors.toList());
-    }
-
-    @Transactional(readOnly = true)
-    public List<Samochod> findByRodzajPaliwa(String rodzajPaliwa) {
-        return samochodRepository.findAll().stream()
-                .filter(s -> rodzajPaliwa.equalsIgnoreCase(s.getRodzajPaliwa()))
-                .collect(Collectors.toList());
-    }
-
-    @Transactional(readOnly = true)
-    public List<Samochod> findBySkrzyniaBiegow(String skrzyniaBiegow) {
-        return samochodRepository.findAll().stream()
-                .filter(s -> skrzyniaBiegow.equalsIgnoreCase(s.getSkrzyniaBiegow()))
-                .collect(Collectors.toList());
+        return samochodRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Błąd podczas aktualizacji statusu samochodu"));
     }
 
     @Transactional(readOnly = true)
@@ -141,11 +316,80 @@ public class SamochodService {
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
-    public List<String> findAllModele() {
-        return samochodRepository.findAll().stream()
-                .map(Samochod::getModel)
-                .distinct()
-                .collect(Collectors.toList());
+    // ==================== METODY MAPUJĄCE ====================
+
+    private Samochod mapToSamochodFromArray(Object[] result) {
+        Samochod samochod = new Samochod();
+        samochod.setId(((Number) result[0]).longValue());
+        samochod.setMarka((String) result[1]);
+        samochod.setModel((String) result[2]);
+        samochod.setRokProdukcji(((Number) result[3]).intValue());
+        samochod.setCena((BigDecimal) result[4]);
+        samochod.setStatus((String) result[5]);
+        return samochod;
+    }
+
+    private BrandStatistics mapToBrandStatistics(Object[] result) {
+        return new BrandStatistics(
+                (String) result[0],
+                ((Number) result[1]).longValue(),
+                (BigDecimal) result[2]
+        );
+    }
+
+    private MonthlySales mapToMonthlySales(Object[] result) {
+        return new MonthlySales(
+                ((java.sql.Date) result[0]).toLocalDate(),
+                (String) result[1],
+                (String) result[2],
+                (BigDecimal) result[3],
+                (String) result[4],
+                (String) result[5]
+        );
+    }
+
+    // ==================== KLASY POMOCNICZE ====================
+
+    @Data
+    public static class SearchCriteria {
+        private String marka;
+        private String model;
+        private Integer minRok;
+        private Integer maxRok;
+        private Integer minPrzebieg;
+        private Integer maxPrzebieg;
+        private BigDecimal minCena;
+        private BigDecimal maxCena;
+        private String rodzajPaliwa;
+        private String status;
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class CarStatistics {
+        private Long totalCars;
+        private Long availableCars;
+        private Long soldCars;
+        private Long reservedCars;
+        private BigDecimal avgPrice;
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class BrandStatistics {
+        private String marka;
+        private Long carCount;
+        private BigDecimal avgPrice;
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class MonthlySales {
+        private LocalDate dataZakupu;
+        private String marka;
+        private String model;
+        private BigDecimal cenaZakupu;
+        private String klient;
+        private String pracownik;
     }
 }
