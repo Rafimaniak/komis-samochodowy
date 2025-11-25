@@ -1,5 +1,5 @@
 Eksport struktury katalog體 i plik體
-Wygenerowano: 11/25/2025 13:30:21
+Wygenerowano: 11/25/2025 16:09:17
 
 
 
@@ -116,7 +116,6 @@ public class SecurityConfig {
                         // Strony publiczne - dost臋pne bez logowania
                         .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/**",
                                 "/samochody", "/samochody/szczegoly", "/register",
-                                "/generate-password", "/test-passwords",
                                 "/search", "/search/**", "/search/quick", "/search/quick/**").permitAll() // DODANO BRAKUJ膭CE ENDPOINTY
 
                         // Strony admina - wymagaj膮 roli ADMIN
@@ -177,8 +176,8 @@ public class AdminController {
     @GetMapping
     public String adminPanel(Model model) {
         long totalUsers = userService.count();
-        long totalCars = samochodService.findAll().size();
-        long availableCars = samochodService.findByStatus("DOSTEPNY").size();
+        long totalCars = samochodService.count();
+        long availableCars = samochodService.countByStatus("DOSTEPNY");
 
         model.addAttribute("totalUsers", totalUsers);
         model.addAttribute("totalCars", totalCars);
@@ -218,7 +217,7 @@ public class AdminUserController {
 
     @GetMapping
     public String listUsers(Model model) {
-        List<User> users = userService.findAll();
+        List<User> users = userService.findAllUsers();
         model.addAttribute("users", users);
         model.addAttribute("tytul", "Zarz膮dzanie u偶ytkownikami");
         return "admin/users";
@@ -376,7 +375,7 @@ public class KlientController {
     @GetMapping("/klienci")
     public String listaKlientow(Model model) {
         // Pobierz wszystkich u偶ytkownik贸w z rol膮 USER
-        List<User> klienci = userService.findAll().stream()
+        List<User> klienci = userService.findAllUsers().stream()
                 .filter(user -> "USER".equals(user.getRole()))
                 .collect(Collectors.toList());
 
@@ -460,42 +459,6 @@ public class LoginController {
 }
 
 
-孋IE疜A: src\main\java\pl\komis\controller\PasswordGeneratorController.java
-------------------------------------------------------------------------------
-package pl.komis.controller;
-
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-
-@Controller
-@RequiredArgsConstructor
-public class PasswordGeneratorController {
-
-    private final PasswordEncoder passwordEncoder;
-
-    @GetMapping("/password-generator")
-    public String showPasswordGenerator() {
-        return "password-generator";
-    }
-
-    @GetMapping("/generate")
-    public String generatePassword(@RequestParam String password, Model model) {
-        String encodedPassword = passwordEncoder.encode(password);
-
-        model.addAttribute("rawPassword", password);
-        model.addAttribute("encodedPassword", encodedPassword);
-        model.addAttribute("sqlUpdate",
-                "UPDATE users SET password = '" + encodedPassword + "' WHERE username = 'twoja_nazwa_uzytkownika';");
-
-        return "password-generator";
-    }
-}
-
-
 孋IE疜A: src\main\java\pl\komis\controller\PracownikController.java
 ----------------------------------------------------------------------
 package pl.komis.controller;
@@ -521,7 +484,7 @@ public class PracownikController {
     @GetMapping("/pracownicy")
     public String listaPracownikow(Model model) {
         // Pobierz wszystkich u偶ytkownik贸w z rol膮 ADMIN
-        List<User> pracownicy = userService.findAll().stream()
+        List<User> pracownicy = userService.findAllUsers().stream()
                 .filter(user -> "ADMIN".equals(user.getRole()))
                 .collect(Collectors.toList());
 
@@ -892,6 +855,8 @@ public class SamochodController {
 
 孋IE疜A: src\main\java\pl\komis\controller\SearchController.java
 -------------------------------------------------------------------
+// src\main\java\pl\komis\controller\SearchController.java
+
 package pl.komis.controller;
 
 import lombok.RequiredArgsConstructor;
@@ -901,6 +866,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import pl.komis.model.Samochod;
 import pl.komis.service.SamochodService;
 
@@ -943,11 +909,45 @@ public class SearchController {
         return "search/results";
     }
 
+    // DODAJ T臉 METOD臉 DLA WYSZUKIWANIA GET
+    @GetMapping("/results")
+    public String searchCarsGet(
+            @RequestParam(required = false) String marka,
+            @RequestParam(required = false) String model,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Integer minRok,
+            @RequestParam(required = false) Integer maxRok,
+            @RequestParam(required = false) Integer minPrzebieg,
+            @RequestParam(required = false) Integer maxPrzebieg,
+            @RequestParam(required = false) String rodzajPaliwa,
+            Model modelAttr) {
+
+        SamochodService.SearchCriteria criteria = new SamochodService.SearchCriteria();
+        criteria.setMarka(marka);
+        criteria.setModel(model);
+        criteria.setStatus(status);
+        criteria.setMinRok(minRok);
+        criteria.setMaxRok(maxRok);
+        criteria.setMinPrzebieg(minPrzebieg);
+        criteria.setMaxPrzebieg(maxPrzebieg);
+        criteria.setRodzajPaliwa(rodzajPaliwa);
+
+        List<Samochod> results = samochodService.searchCars(criteria);
+
+        modelAttr.addAttribute("searchCriteria", criteria);
+        modelAttr.addAttribute("samochody", results);
+        modelAttr.addAttribute("marki", samochodService.findAllMarki());
+        modelAttr.addAttribute("tytul", "Wyniki wyszukiwania");
+        modelAttr.addAttribute("resultsCount", results.size());
+
+        return "search/results";
+    }
+
     @GetMapping("/quick")
     public String quickSearch(
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String marka,
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String model,
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String status,
+            @RequestParam(required = false) String marka,
+            @RequestParam(required = false) String model,
+            @RequestParam(required = false) String status,
             Model modelAttr) {
 
         List<Samochod> results = samochodService.searchCarsSimple(marka, model, status);
@@ -961,59 +961,6 @@ public class SearchController {
         modelAttr.addAttribute("searchStatus", status);
 
         return "search/quick-results";
-    }
-}
-
-
-孋IE疜A: src\main\java\pl\komis\controller\StatystykiController.java
------------------------------------------------------------------------
-package pl.komis.controller;
-
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import pl.komis.service.SamochodService;
-
-import java.util.List;
-
-@Controller
-@RequestMapping("/stats")
-@PreAuthorize("hasRole('ADMIN')")
-@RequiredArgsConstructor
-public class StatystykiController {
-
-    private final SamochodService samochodService;
-
-    @GetMapping
-    public String showStats(Model model) {
-        SamochodService.CarStatistics stats = samochodService.getCarStatistics();
-        List<SamochodService.BrandStatistics> topBrands = samochodService.getTopBrands(10);
-
-        model.addAttribute("stats", stats);
-        model.addAttribute("topBrands", topBrands);
-        model.addAttribute("tytul", "Statystyki samochod贸w");
-
-        return "stats/car-stats";
-    }
-
-    @GetMapping("/sales")
-    public String salesReport(
-            @RequestParam(defaultValue = "2025") Integer year,
-            @RequestParam(defaultValue = "11") Integer month,
-            Model model) {
-
-        List<SamochodService.MonthlySales> sales = samochodService.getMonthlySalesReport(year, month);
-
-        model.addAttribute("sales", sales);
-        model.addAttribute("year", year);
-        model.addAttribute("month", month);
-        model.addAttribute("tytul", "Raport sprzeda偶y");
-
-        return "stats/sales-report";
     }
 }
 
@@ -1054,63 +1001,6 @@ public class StronaController {
         model.addAttribute("username", authentication.getName());
 
         return "index";
-    }
-}
-
-
-孋IE疜A: src\main\java\pl\komis\controller\TestController.java
------------------------------------------------------------------
-package pl.komis.controller;
-
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import pl.komis.model.User;
-import pl.komis.repository.UserRepository;
-
-@RestController
-@RequiredArgsConstructor
-public class TestController {
-
-    private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
-
-    @GetMapping("/api/debug/password")
-    public String debugPassword(@RequestParam String username, @RequestParam String password) {
-        User user = userRepository.findByUsername(username)
-                .orElse(null);
-
-        if (user == null) {
-            return "User not found: " + username;
-        }
-
-        boolean matches = passwordEncoder.matches(password, user.getPassword());
-
-        return String.format(
-                "Username: %s<br>Stored password: %s<br>Input password: %s<br>Matches: %s<br>Password length: %d",
-                username,
-                user.getPassword(),
-                password,
-                matches,
-                user.getPassword().length()
-        );
-    }
-
-    @GetMapping("/api/debug/users")
-    public String debugUsers() {
-        StringBuilder result = new StringBuilder();
-        result.append("<h3>All Users:</h3>");
-
-        userRepository.findAll().forEach(user -> {
-            result.append(String.format(
-                    "Username: %s, Email: %s, Role: %s, Enabled: %s<br>",
-                    user.getUsername(), user.getEmail(), user.getRole(), user.getEnabled()
-            ));
-        });
-
-        return result.toString();
     }
 }
 
@@ -1854,6 +1744,20 @@ public interface SamochodRepository extends JpaRepository<Samochod, Long> {
     List<Samochod> findByCenaBetween(@Param("minCena") BigDecimal minCena,
                                      @Param("maxCena") BigDecimal maxCena);
 
+    // ==================== NOWE EFEKTYWNE METODY ====================
+
+    @Query(value = "SELECT DISTINCT marka FROM samochody ORDER BY marka", nativeQuery = true)
+    List<String> findAllMarkiDistinct();
+
+    @Query("SELECT COUNT(s) FROM Samochod s WHERE s.status = :status")
+    long countByStatus(@Param("status") String status);
+
+    @Query(value = "SELECT * FROM get_car_statistics()", nativeQuery = true)
+    Map<String, Object> getCarStatistics();
+
+    @Query(value = "SELECT * FROM get_popular_brands(:limitCount)", nativeQuery = true)
+    List<Object[]> getPopularBrands(@Param("limitCount") Integer limitCount);
+
     // ==================== PROCEDURY CRUD ====================
 
     @Procedure(procedureName = "create_car")
@@ -1890,7 +1794,7 @@ public interface SamochodRepository extends JpaRepository<Samochod, Long> {
     @Procedure(procedureName = "delete_car")
     void deleteCar(@Param("p_id") Long id);
 
-    // ==================== ZAAWANSOWANE WYSZUKIWANIE - BEZPO艢REDNIE ZAPYTANIE SQL ====================
+    // ==================== ZAAWANSOWANE WYSZUKIWANIE ====================
 
     @Query(value = "SELECT s.* FROM samochody s " +
             "WHERE (:p_marka IS NULL OR LOWER(s.marka) = LOWER(:p_marka)) " +
@@ -1946,23 +1850,6 @@ public interface SamochodRepository extends JpaRepository<Samochod, Long> {
 
     @Procedure(procedureName = "cancel_reservation")
     Map<String, Object> cancelReservation(@Param("p_car_id") Long carId);
-
-    // ==================== FUNKCJE RAPORTOWANIA I STATYSTYK ====================
-
-    @Query(value = "SELECT * FROM get_available_cars()", nativeQuery = true)
-    List<Object[]> getAvailableCars();
-
-    @Query(value = "SELECT * FROM get_car_stats()", nativeQuery = true)
-    Map<String, Object> getCarStatistics();
-
-    @Query(value = "SELECT * FROM get_top_brands(:limit_count)", nativeQuery = true)
-    List<Object[]> getTopBrands(@Param("limit_count") Integer limitCount);
-
-    @Query(value = "SELECT * FROM get_monthly_sales_report_func(:p_year, :p_month)", nativeQuery = true)
-    List<Object[]> getMonthlySalesReport(
-            @Param("p_year") Integer year,
-            @Param("p_month") Integer month
-    );
 }
 
 
@@ -2022,6 +1909,8 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import pl.komis.model.User;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Repository
@@ -2032,7 +1921,25 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByUsername(String username);
     boolean existsByEmail(String email);
 
-    // Wywo艂anie PROCEDURY tworzenia u偶ytkownika
+    // ==================== NOWE EFEKTYWNE METODY ====================
+
+    @Query("SELECT u FROM User u WHERE u.role = :role")
+    List<User> findByRole(@Param("role") String role);
+
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role = :role")
+    long countByRole(@Param("role") String role);
+
+    @Query("SELECT u FROM User u WHERE u.enabled = true")
+    List<User> findActiveUsers();
+
+    @Query("SELECT u FROM User u WHERE u.enabled = false")
+    List<User> findInactiveUsers();
+
+    @Query(value = "SELECT * FROM get_user_statistics()", nativeQuery = true)
+    Map<String, Object> getUserStatisticsNative();
+
+    // ==================== PROCEDURY ====================
+
     @Procedure(procedureName = "create_user")
     Long createUser(
             @Param("p_username") String username,
@@ -2042,7 +1949,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
             @Param("p_enabled") Boolean enabled
     );
 
-    // Wywo艂anie PROCEDURY aktualizacji u偶ytkownika
     @Procedure(procedureName = "update_user")
     void updateUser(
             @Param("p_id") Long id,
@@ -2053,7 +1959,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
             @Param("p_enabled") Boolean enabled
     );
 
-    // Wywo艂anie PROCEDURY usuwania u偶ytkownika
     @Procedure(procedureName = "delete_user")
     void deleteUser(@Param("p_id") Long id);
 }
@@ -2390,7 +2295,6 @@ public class PromocjaService {
 ---------------------------------------------------------------
 package pl.komis.service;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -2412,7 +2316,7 @@ public class SamochodService {
 
     private final SamochodRepository samochodRepository;
 
-    // ==================== PODSTAWOWE OPERACJE CRUD PRZEZ PROCEDURY ====================
+    // ==================== PODSTAWOWE OPERACJE CRUD ====================
 
     @Transactional(readOnly = true)
     public List<Samochod> findAll() {
@@ -2426,7 +2330,7 @@ public class SamochodService {
 
     @Transactional
     public Samochod save(Samochod samochod) {
-        // Ustaw domy艣lne warto艣ci je艣li potrzebne
+        // Ustaw domy艣lne warto艣ci je偶eli potrzebne
         if (samochod.getDataDodania() == null) {
             samochod.setDataDodania(LocalDate.now());
         }
@@ -2498,7 +2402,7 @@ public class SamochodService {
         samochodRepository.deleteCar(id);
     }
 
-    // ==================== ZAAWANSOWANE WYSZUKIWANIE PRZEZ BEZPO艢REDNIE ZAPYTANIE SQL ====================
+    // ==================== ZAAWANSOWANE WYSZUKIWANIE ====================
 
     @Transactional(readOnly = true)
     public List<Samochod> searchCars(SearchCriteria criteria) {
@@ -2532,7 +2436,7 @@ public class SamochodService {
         return samochodRepository.searchCarsSimple(searchMarka, searchModel, searchStatus);
     }
 
-    // ==================== OPERACJE BIZNESOWE PRZEZ PROCEDURY ====================
+    // ==================== OPERACJE BIZNESOWE ====================
 
     @Transactional
     public Map<String, Object> reserveCar(Long carId, Long userId) {
@@ -2561,60 +2465,6 @@ public class SamochodService {
         }
     }
 
-    // ==================== RAPORTY I STATYSTYKI PRZEZ FUNKCJE ====================
-
-    @Transactional(readOnly = true)
-    public List<Samochod> getAvailableCars() {
-        try {
-            List<Object[]> results = samochodRepository.getAvailableCars();
-            return results.stream()
-                    .map(this::mapToSamochodFromArray)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            throw new RuntimeException("B艂膮d podczas pobierania dost臋pnych samochod贸w: " + e.getMessage());
-        }
-    }
-
-    @Transactional(readOnly = true)
-    public CarStatistics getCarStatistics() {
-        try {
-            Map<String, Object> stats = samochodRepository.getCarStatistics();
-            return new CarStatistics(
-                    ((Number) stats.get("total_cars")).longValue(),
-                    ((Number) stats.get("available_cars")).longValue(),
-                    ((Number) stats.get("sold_cars")).longValue(),
-                    ((Number) stats.get("reserved_cars")).longValue(),
-                    (BigDecimal) stats.get("avg_price")
-            );
-        } catch (Exception e) {
-            throw new RuntimeException("B艂膮d podczas pobierania statystyk: " + e.getMessage());
-        }
-    }
-
-    @Transactional(readOnly = true)
-    public List<BrandStatistics> getTopBrands(Integer limitCount) {
-        try {
-            List<Object[]> results = samochodRepository.getTopBrands(limitCount != null ? limitCount : 5);
-            return results.stream()
-                    .map(this::mapToBrandStatistics)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            throw new RuntimeException("B艂膮d podczas pobierania top marek: " + e.getMessage());
-        }
-    }
-
-    @Transactional(readOnly = true)
-    public List<MonthlySales> getMonthlySalesReport(Integer year, Integer month) {
-        try {
-            List<Object[]> results = samochodRepository.getMonthlySalesReport(year, month);
-            return results.stream()
-                    .map(this::mapToMonthlySales)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            throw new RuntimeException("B艂膮d podczas pobierania raportu sprzeda偶y: " + e.getMessage());
-        }
-    }
-
     // ==================== METODY POMOCNICZE ====================
 
     @Transactional(readOnly = true)
@@ -2638,20 +2488,13 @@ public class SamochodService {
     }
 
     @Transactional(readOnly = true)
-    public List<Samochod> findByCenaBetween(double min, double max) {
-        BigDecimal minCena = BigDecimal.valueOf(min);
-        BigDecimal maxCena = BigDecimal.valueOf(max);
-        return samochodRepository.findByCenaBetween(minCena, maxCena);
-    }
-
-    @Transactional(readOnly = true)
     public long count() {
         return samochodRepository.count();
     }
 
     @Transactional(readOnly = true)
     public long countByStatus(String status) {
-        return samochodRepository.findByStatus(status).size();
+        return samochodRepository.countByStatus(status);
     }
 
     @Transactional(readOnly = true)
@@ -2700,42 +2543,19 @@ public class SamochodService {
 
     @Transactional(readOnly = true)
     public List<String> findAllMarki() {
-        return samochodRepository.findAll().stream()
-                .map(Samochod::getMarka)
-                .distinct()
-                .collect(Collectors.toList());
+        return samochodRepository.findAllMarkiDistinct();
     }
 
-    // ==================== METODY MAPUJ膭CE ====================
+    // ==================== NOWE METODY DLA STATYSTYK ====================
 
-    private Samochod mapToSamochodFromArray(Object[] result) {
-        Samochod samochod = new Samochod();
-        samochod.setId(((Number) result[0]).longValue());
-        samochod.setMarka((String) result[1]);
-        samochod.setModel((String) result[2]);
-        samochod.setRokProdukcji(((Number) result[3]).intValue());
-        samochod.setCena((BigDecimal) result[4]);
-        samochod.setStatus((String) result[5]);
-        return samochod;
+    @Transactional(readOnly = true)
+    public Map<String, Object> getCarStatistics() {
+        return samochodRepository.getCarStatistics();
     }
 
-    private BrandStatistics mapToBrandStatistics(Object[] result) {
-        return new BrandStatistics(
-                (String) result[0],
-                ((Number) result[1]).longValue(),
-                (BigDecimal) result[2]
-        );
-    }
-
-    private MonthlySales mapToMonthlySales(Object[] result) {
-        return new MonthlySales(
-                ((java.sql.Date) result[0]).toLocalDate(),
-                (String) result[1],
-                (String) result[2],
-                (BigDecimal) result[3],
-                (String) result[4],
-                (String) result[5]
-        );
+    @Transactional(readOnly = true)
+    public List<Object[]> getPopularBrands(Integer limit) {
+        return samochodRepository.getPopularBrands(limit);
     }
 
     // ==================== KLASY POMOCNICZE ====================
@@ -2753,35 +2573,6 @@ public class SamochodService {
         private String rodzajPaliwa;
         private String status;
     }
-
-    @Data
-    @AllArgsConstructor
-    public static class CarStatistics {
-        private Long totalCars;
-        private Long availableCars;
-        private Long soldCars;
-        private Long reservedCars;
-        private BigDecimal avgPrice;
-    }
-
-    @Data
-    @AllArgsConstructor
-    public static class BrandStatistics {
-        private String marka;
-        private Long carCount;
-        private BigDecimal avgPrice;
-    }
-
-    @Data
-    @AllArgsConstructor
-    public static class MonthlySales {
-        private LocalDate dataZakupu;
-        private String marka;
-        private String model;
-        private BigDecimal cenaZakupu;
-        private String klient;
-        private String pracownik;
-    }
 }
 
 
@@ -2796,8 +2587,8 @@ import org.springframework.stereotype.Service;
 import pl.komis.model.User;
 import pl.komis.repository.UserRepository;
 
-import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -2884,13 +2675,7 @@ public class UserService {
 
     // ==================== METODY ODCZYTU ====================
 
-    public List<User> findAll() {
-        return userRepository.findAll();
-    }
-
-    public List<User> findAllUsers() {
-        return userRepository.findAll();
-    }
+    public List<User> findAllUsers() { return userRepository.findAll(); }
 
     public Optional<User> findById(Long id) {
         return userRepository.findById(id);
@@ -3080,41 +2865,29 @@ public class UserService {
     }
 
     public long countByRole(String role) {
-        return userRepository.findAll().stream()
-                .filter(user -> role.equals(user.getRole()))
-                .count();
+        return userRepository.countByRole(role);
     }
 
     public long countActiveUsers() {
-        return userRepository.findAll().stream()
-                .filter(User::getEnabled)
-                .count();
+        return userRepository.findActiveUsers().size();
     }
 
     public long countInactiveUsers() {
-        return userRepository.findAll().stream()
-                .filter(user -> !user.getEnabled())
-                .count();
+        return userRepository.findInactiveUsers().size();
     }
 
     // ==================== METODY SPECJALNE ====================
 
     public List<User> findByRole(String role) {
-        return userRepository.findAll().stream()
-                .filter(user -> role.equals(user.getRole()))
-                .collect(Collectors.toList());
+        return userRepository.findByRole(role);
     }
 
     public List<User> findActiveUsers() {
-        return userRepository.findAll().stream()
-                .filter(User::getEnabled)
-                .collect(Collectors.toList());
+        return userRepository.findActiveUsers();
     }
 
     public List<User> findInactiveUsers() {
-        return userRepository.findAll().stream()
-                .filter(user -> !user.getEnabled())
-                .collect(Collectors.toList());
+        return userRepository.findInactiveUsers();
     }
 
     public List<User> findAdmins() {
@@ -3184,19 +2957,20 @@ public class UserService {
     // ==================== METODY RAPORTOWANIA ====================
 
     public UserStatistics getUserStatistics() {
-        long totalUsers = count();
-        long activeUsers = countActiveUsers();
-        long inactiveUsers = countInactiveUsers();
-        long adminUsers = countByRole("ADMIN");
-        long regularUsers = countByRole("USER");
+        Map<String, Object> stats = userRepository.getUserStatisticsNative();
 
-        return new UserStatistics(totalUsers, activeUsers, inactiveUsers, adminUsers, regularUsers);
+        return new UserStatistics(
+                ((Number) stats.get("total_users")).longValue(),
+                ((Number) stats.get("active_users")).longValue(),
+                ((Number) stats.get("inactive_users")).longValue(),
+                ((Number) stats.get("admin_users")).longValue(),
+                ((Number) stats.get("regular_users")).longValue()
+        );
     }
 
     // Klasa pomocnicza dla statystyk
     @Getter
     public static class UserStatistics {
-        // Gettery
         private final long totalUsers;
         private final long activeUsers;
         private final long inactiveUsers;
@@ -3210,7 +2984,6 @@ public class UserService {
             this.adminUsers = adminUsers;
             this.regularUsers = regularUsers;
         }
-
     }
 }
 
@@ -3352,47 +3125,7 @@ server:
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container">
-        <a class="navbar-brand" href="/">馃殫 Komis Samochodowy</a>
-
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <div class="navbar-nav">
-                <a class="nav-link" href="/samochody">Samochody</a>
-                <a class="nav-link" href="/search">
-                    <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
-                </a>
-                <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                        Admin
-                    </a>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
-                        <li><a class="dropdown-item" href="/admin/users">U偶ytkownicy</a></li>
-                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
-                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
-                        <li><a class="dropdown-item" href="/zakupy">Zakupy</a></li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="navbar-nav ms-auto">
-                <div sec:authorize="isAuthenticated()">
-                    <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
-                    <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
-                </div>
-                <div sec:authorize="!isAuthenticated()">
-                    <a class="nav-link" href="/login">Zaloguj</a>
-                    <a class="nav-link" href="/register">Rejestracja</a>
-                </div>
-            </div>
-        </div>
-    </div>
-</nav>
+<div th:replace="fragments/navbar :: main-nav"></div>
 
 <div class="container mt-4">
     <!-- Komunikat o wylogowaniu -->
@@ -3677,14 +3410,7 @@ server:
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container">
-        <a class="navbar-brand" href="/">馃殫 Komis Samochodowy</a>
-        <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="/register">Zarejestruj si臋</a>
-        </div>
-    </div>
-</nav>
+<div th:replace="fragments/navbar :: main-nav"></div>
 
 <div class="container">
     <div class="login-container">
@@ -3790,57 +3516,6 @@ server:
 </html>
 
 
-孋IE疜A: src\main\resources\templates\password-generator.html
-----------------------------------------------------------------
-<!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
-<head>
-    <meta charset="UTF-8">
-    <title>Generator Hase艂 BCrypt</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-<div class="container mt-5">
-    <h1>馃攼 Generator Hase艂 BCrypt</h1>
-
-    <div class="card mt-4">
-        <div class="card-body">
-            <form method="get" action="/generate">
-                <div class="mb-3">
-                    <label for="password" class="form-label">Has艂o do zakodowania:</label>
-                    <input type="text" class="form-control" id="password" name="password"
-                           placeholder="Wprowad藕 has艂o" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Generuj BCrypt</button>
-            </form>
-        </div>
-    </div>
-
-    <div th:if="${encodedPassword}" class="card mt-4">
-        <div class="card-body">
-            <h5 class="card-title">Wynik:</h5>
-            <p><strong>Has艂o:</strong> <span th:text="${rawPassword}"></span></p>
-            <p><strong>Zakodowane BCrypt:</strong> <code th:text="${encodedPassword}"></code></p>
-            <p><strong>Zapytanie SQL:</strong></p>
-            <pre class="bg-light p-3"><code th:text="${sqlUpdate}"></code></pre>
-        </div>
-    </div>
-
-    <div class="card mt-4">
-        <div class="card-body">
-            <h5 class="card-title">Przyk艂adowe has艂a:</h5>
-            <ul>
-                <li><a href="/generate?password=admin">admin</a></li>
-                <li><a href="/generate?password=user">user</a></li>
-                <li><a href="/generate?password=testowy">testowy</a></li>
-            </ul>
-        </div>
-    </div>
-</div>
-</body>
-</html>
-
-
 孋IE疜A: src\main\resources\templates\pracownicy.html
 --------------------------------------------------------
 <!DOCTYPE html>
@@ -3935,14 +3610,7 @@ server:
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container">
-        <a class="navbar-brand" href="/">馃殫 Komis Samochodowy</a>
-        <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="/login">Zaloguj</a>
-        </div>
-    </div>
-</nav>
+<div th:replace="fragments/navbar :: main-nav"></div>
 
 <div class="container">
     <div class="register-container">
@@ -4343,7 +4011,6 @@ server:
                         <li><a class="dropdown-item" href="/admin/users">U偶ytkownicy</a></li>
                         <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
                         <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
-                        <li><a class="dropdown-item" href="/stats"><i class="fas fa-chart-bar me-1"></i> Statystyki</a></li>
                     </ul>
                 </div>
             </div>
@@ -4767,6 +4434,56 @@ server:
 </html>
 
 
+孋IE疜A: src\main\resources\templates\fragments\navbar.html
+--------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<div th:fragment="main-nav">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">馃殫 Komis Samochodowy</a>
+
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <div class="navbar-nav">
+                    <a class="nav-link" href="/samochody">Samochody</a>
+                    <a class="nav-link" href="/search">
+                        <i class="fas fa-search me-1"></i> Wyszukiwanie
+                    </a>
+                    <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            Admin
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
+                            <li><a class="dropdown-item" href="/admin/users">U偶ytkownicy</a></li>
+                            <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
+                            <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="navbar-nav ms-auto">
+                    <div sec:authorize="isAuthenticated()">
+                        <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                        <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
+                    </div>
+                    <div sec:authorize="!isAuthenticated()">
+                        <a class="nav-link" href="/login">Zaloguj</a>
+                        <a class="nav-link" href="/register">Rejestracja</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+</div>
+</html>
+
+
 孋IE疜A: src\main\resources\templates\fragments\samochod-form-fields.html
 ----------------------------------------------------------------------------
 <!DOCTYPE html>
@@ -5149,46 +4866,7 @@ server:
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container">
-        <a class="navbar-brand" href="/">馃殫 Komis Samochodowy</a>
-
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <div class="navbar-nav">
-                <a class="nav-link" href="/samochody">Samochody</a>
-                <a class="nav-link" href="/search">
-                    <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
-                </a>
-                <div sec:authorize="hasRole('ADMIN')" class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                        Admin
-                    </a>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
-                        <li><a class="dropdown-item" href="/admin/users">U偶ytkownicy</a></li>
-                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
-                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="navbar-nav ms-auto">
-                <div sec:authorize="isAuthenticated()">
-                    <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
-                    <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
-                </div>
-                <div sec:authorize="!isAuthenticated()">
-                    <a class="nav-link" href="/login">Zaloguj</a>
-                    <a class="nav-link" href="/register">Rejestracja</a>
-                </div>
-            </div>
-        </div>
-    </div>
-</nav>
+<div th:replace="fragments/navbar :: main-nav"></div>
 
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -5577,30 +5255,30 @@ server:
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
-    <title th:text="${tytul}">Zaawansowane wyszukiwanie</title>
+    <title>Zaawansowane wyszukiwanie - Komis Samochodowy</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
-        <a class="navbar-brand" href="/">馃弫 Komis Samochodowy</a>
+        <a class="navbar-brand" href="/">馃殫 Komis Samochodowy</a>
         <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="/samochody">Lista samochod贸w</a>
+            <a class="nav-link" href="/samochody">Powr贸t do listy</a>
             <a class="nav-link" href="/">Strona g艂贸wna</a>
         </div>
     </div>
 </nav>
 
 <div class="container mt-4">
-    <div class="row">
-        <div class="col-md-8 mx-auto">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header bg-primary text-white">
                     <h4 class="mb-0"><i class="fas fa-search me-2"></i>Zaawansowane wyszukiwanie samochod贸w</h4>
                 </div>
                 <div class="card-body">
-                    <form th:action="@{/search}" th:object="${searchCriteria}" method="post">
+                    <form th:action="@{/search}" method="post" th:object="${searchCriteria}">
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label for="marka" class="form-label">Marka</label>
@@ -5613,52 +5291,45 @@ server:
                             </div>
                             <div class="col-md-6 mb-3">
                                 <label for="model" class="form-label">Model</label>
-                                <input type="text" class="form-control" id="model" th:field="*{model}"
-                                       placeholder="Wpisz model">
+                                <input type="text" class="form-control" id="model"
+                                       th:field="*{model}" placeholder="Wpisz model">
                             </div>
                         </div>
 
                         <div class="row">
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <label for="minRok" class="form-label">Rok produkcji od</label>
-                                <input type="number" class="form-control" id="minRok" th:field="*{minRok}"
-                                       min="1990" max="2025" placeholder="1990">
+                                <input type="number" class="form-control" id="minRok"
+                                       th:field="*{minRok}" min="1990" max="2025" placeholder="np. 2015">
                             </div>
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <label for="maxRok" class="form-label">Rok produkcji do</label>
-                                <input type="number" class="form-control" id="maxRok" th:field="*{maxRok}"
-                                       min="1990" max="2025" placeholder="2025">
+                                <input type="number" class="form-control" id="maxRok"
+                                       th:field="*{maxRok}" min="1990" max="2025" placeholder="np. 2020">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="status" class="form-label">Status</label>
+                                <select class="form-select" id="status" th:field="*{status}">
+                                    <option value="">Dowolny status</option>
+                                    <option value="DOSTEPNY">Dost臋pny</option>
+                                    <option value="ZAREZERWOWANY">Zarezerwowany</option>
+                                    <option value="SPRZEDANY">Sprzedany</option>
+                                </select>
                             </div>
                         </div>
 
                         <div class="row">
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <label for="minPrzebieg" class="form-label">Przebieg od (km)</label>
-                                <input type="number" class="form-control" id="minPrzebieg" th:field="*{minPrzebieg}"
-                                       min="0" placeholder="0">
+                                <input type="number" class="form-control" id="minPrzebieg"
+                                       th:field="*{minPrzebieg}" min="0" placeholder="np. 0">
                             </div>
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <label for="maxPrzebieg" class="form-label">Przebieg do (km)</label>
-                                <input type="number" class="form-control" id="maxPrzebieg" th:field="*{maxPrzebieg}"
-                                       min="0" placeholder="500000">
+                                <input type="number" class="form-control" id="maxPrzebieg"
+                                       th:field="*{maxPrzebieg}" min="0" placeholder="np. 100000">
                             </div>
-                        </div>
-
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="minCena" class="form-label">Cena od (z艂)</label>
-                                <input type="number" class="form-control" id="minCena" th:field="*{minCena}"
-                                       min="0" step="1000" placeholder="0">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="maxCena" class="form-label">Cena do (z艂)</label>
-                                <input type="number" class="form-control" id="maxCena" th:field="*{maxCena}"
-                                       min="0" step="1000" placeholder="500000">
-                            </div>
-                        </div>
-
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <label for="rodzajPaliwa" class="form-label">Rodzaj paliwa</label>
                                 <select class="form-select" id="rodzajPaliwa" th:field="*{rodzajPaliwa}">
                                     <option value="">Dowolny</option>
@@ -5668,14 +5339,18 @@ server:
                                     <option value="Elektryczny">Elektryczny</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <div class="row">
                             <div class="col-md-6 mb-3">
-                                <label for="status" class="form-label">Status</label>
-                                <select class="form-select" id="status" th:field="*{status}">
-                                    <option value="">Dowolny</option>
-                                    <option value="DOSTEPNY">Dost臋pny</option>
-                                    <option value="ZAREZERWOWANY">Zarezerwowany</option>
-                                    <option value="SPRZEDANY">Sprzedany</option>
-                                </select>
+                                <label for="minCena" class="form-label">Cena od (z艂)</label>
+                                <input type="number" class="form-control" id="minCena"
+                                       th:field="*{minCena}" min="0" placeholder="np. 0">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="maxCena" class="form-label">Cena do (z艂)</label>
+                                <input type="number" class="form-control" id="maxCena"
+                                       th:field="*{maxCena}" min="0" placeholder="np. 100000">
                             </div>
                         </div>
 
@@ -5686,15 +5361,10 @@ server:
                             </button>
                         </div>
                     </form>
-                </div>
-            </div>
 
-            <!-- Szybkie wyszukiwanie -->
-            <div class="card mt-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-bolt me-2"></i>Szybkie wyszukiwanie</h5>
-                </div>
-                <div class="card-body">
+                    <!-- Szybkie wyszukiwanie -->
+                    <hr class="my-4">
+                    <h5 class="mb-3">Szybkie wyszukiwanie</h5>
                     <form th:action="@{/search/quick}" method="get" class="row g-3">
                         <div class="col-md-4">
                             <select class="form-select" name="marka">
@@ -5709,14 +5379,14 @@ server:
                         </div>
                         <div class="col-md-4">
                             <select class="form-select" name="status">
-                                <option value="">Dowolny status</option>
+                                <option value="">Status</option>
                                 <option value="DOSTEPNY">Dost臋pny</option>
                                 <option value="ZAREZERWOWANY">Zarezerwowany</option>
                             </select>
                         </div>
                         <div class="col-12">
-                            <button type="submit" class="btn btn-outline-primary w-100">
-                                <i class="fas fa-search me-1"></i> Szybkie wyszukiwanie
+                            <button type="submit" class="btn btn-outline-primary">
+                                <i class="fas fa-bolt me-1"></i> Szybkie wyszukiwanie
                             </button>
                         </div>
                     </form>
@@ -5731,219 +5401,107 @@ server:
 </html>
 
 
-孋IE疜A: src\main\resources\templates\search\results.html
-------------------------------------------------------------
+孋IE疜A: src\main\resources\templates\search\quick-results.html
+------------------------------------------------------------------
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
-    <title>Wyniki wyszukiwania - Komis</title>
+    <title>Szybkie wyszukiwanie - Komis Samochodowy</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .car-image {
-            width: 80px;
-            height: 60px;
-            object-fit: cover;
-            border-radius: 5px;
-        }
-        .no-image {
-            width: 80px;
-            height: 60px;
-            background-color: #f8f9fa;
-            border: 1px dashed #dee2e6;
-            border-radius: 5px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #6c757d;
-            font-size: 0.8rem;
-        }
-        .search-criteria {
-            background-color: #f8f9fa;
-            border-left: 4px solid #007bff;
-        }
-        .login-required {
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-        }
-    </style>
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
         <a class="navbar-brand" href="/">馃殫 Komis Samochodowy</a>
-
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <div class="navbar-nav">
-                <a class="nav-link" href="/samochody">Samochody</a>
-                <a class="nav-link" href="/search">
-                    <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
-                </a>
-            </div>
-
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="/login">Zaloguj</a>
-                <a class="nav-link" href="/register">Rejestracja</a>
-            </div>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="/search">Zaawansowane wyszukiwanie</a>
+            <a class="nav-link" href="/samochody">Wszystkie samochody</a>
+            <a class="nav-link" href="/">Strona g艂贸wna</a>
         </div>
     </div>
 </nav>
 
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1><i class="fas fa-search me-2"></i> Wyniki wyszukiwania</h1>
-        <div>
-            <a href="/search" class="btn btn-primary">
-                <i class="fas fa-arrow-left me-1"></i> Nowe wyszukiwanie
-            </a>
-            <a href="/samochody" class="btn btn-secondary ms-2">
-                <i class="fas fa-list me-1"></i> Wszystkie samochody
-            </a>
+        <h1><i class="fas fa-bolt me-2"></i>Szybkie wyszukiwanie</h1>
+        <span class="badge bg-primary fs-6" th:text="'Znaleziono: ' + ${resultsCount} + ' samochod贸w'"></span>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header bg-light">
+            <h5 class="mb-0">Kryteria wyszukiwania</h5>
         </div>
-    </div>
-
-    <!-- Informacja o konieczno艣ci logowania -->
-    <div class="alert alert-warning login-required mb-4">
-        <i class="fas fa-info-circle me-2"></i>
-        <strong>Aby rezerwowa膰 i kupowa膰 samochody, musisz si臋 zalogowa膰.</strong>
-        <a href="/login" class="alert-link ms-2">Zaloguj si臋 teraz</a>
-    </div>
-
-    <!-- Podsumowanie kryteri贸w wyszukiwania -->
-    <div class="card search-criteria mb-4">
         <div class="card-body">
-            <h5 class="card-title"><i class="fas fa-filter me-2"></i>Kryteria wyszukiwania</h5>
             <div class="row">
-                <div class="col-md-6">
-                    <small class="text-muted">Znaleziono: <strong th:text="${resultsCount}"></strong> samochod贸w</small>
+                <div class="col-md-4" th:if="${searchMarka}">
+                    <strong>Marka:</strong> <span th:text="${searchMarka}"></span>
                 </div>
-                <div class="col-md-6 text-end">
-                    <small class="text-muted">
-                        <span th:if="${searchCriteria.marka}">Marka: <strong th:text="${searchCriteria.marka}"></strong></span>
-                        <span th:if="${searchCriteria.model}">, Model: <strong th:text="${searchCriteria.model}"></strong></span>
-                        <span th:if="${searchCriteria.status}">, Status: <strong th:text="${searchCriteria.status}"></strong></span>
-                    </small>
+                <div class="col-md-4" th:if="${searchModel}">
+                    <strong>Model:</strong> <span th:text="${searchModel}"></span>
+                </div>
+                <div class="col-md-4" th:if="${searchStatus}">
+                    <strong>Status:</strong> <span th:text="${searchStatus}"></span>
                 </div>
             </div>
         </div>
     </div>
 
     <div th:if="${samochody.empty}" class="alert alert-info text-center">
-        <i class="fas fa-search fa-2x mb-3"></i><br>
-        <h4>Nie znaleziono samochod贸w spe艂niaj膮cych podane kryteria</h4>
-        <p class="mb-0">Spr贸buj zmieni膰 kryteria wyszukiwania lub <a href="/samochody" class="alert-link">przejd藕 do wszystkich samochod贸w</a></p>
+        <i class="fas fa-info-circle fa-2x mb-3"></i><br>
+        Nie znaleziono samochod贸w spe艂niaj膮cych podane kryteria.
+        <div class="mt-3">
+            <a href="/search" class="btn btn-primary me-2">Zaawansowane wyszukiwanie</a>
+            <a href="/samochody" class="btn btn-outline-primary">Zobacz wszystkie samochody</a>
+        </div>
     </div>
 
     <div th:if="${!samochody.empty}" class="table-responsive">
         <table class="table table-striped table-hover">
             <thead class="table-dark">
             <tr>
-                <th>Zdj臋cie</th>
                 <th>Marka</th>
                 <th>Model</th>
                 <th>Rok</th>
                 <th>Przebieg</th>
-                <th>Cena</th>
                 <th>Paliwo</th>
+                <th>Cena</th>
                 <th>Status</th>
                 <th>Akcje</th>
             </tr>
             </thead>
             <tbody>
             <tr th:each="samochod : ${samochody}">
-                <!-- Zdj臋cie -->
-                <td>
-                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" style="text-decoration: none;">
-                        <div th:if="${samochod.zdjecieUrl != null and samochod.zdjecieUrl != ''}">
-                            <img th:src="${samochod.zdjecieUrl}"
-                                 th:alt="${samochod.marka + ' ' + samochod.model}"
-                                 class="car-image">
-                        </div>
-                        <div th:if="${samochod.zdjecieUrl == null or samochod.zdjecieUrl == ''}" class="no-image">
-                            <i class="fas fa-car"></i>
-                        </div>
-                    </a>
-                </td>
-
-                <!-- Marka -->
-                <td>
-                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="text-dark fw-bold" style="text-decoration: none;">
-                        <span th:text="${samochod.marka}"></span>
-                    </a>
-                </td>
-
-                <!-- Model -->
+                <td th:text="${samochod.marka}"></td>
                 <td th:text="${samochod.model}"></td>
-
-                <!-- Rok -->
                 <td th:text="${samochod.rokProdukcji}"></td>
-
-                <!-- Przebieg -->
                 <td th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></td>
-
-                <!-- Cena -->
+                <td th:text="${samochod.rodzajPaliwa}"></td>
                 <td>
-                    <strong class="text-success"
-                            th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' z艂'}">
-                    </strong>
+                    <strong th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' z艂'}"></strong>
                 </td>
-
-                <!-- Paliwo -->
-                <td>
-                    <span th:if="${samochod.rodzajPaliwa}"
-                          class="badge bg-info"
-                          th:text="${samochod.rodzajPaliwa}">
-                    </span>
-                    <span th:if="${!samochod.rodzajPaliwa}" class="text-muted">-</span>
-                </td>
-
-                <!-- Status -->
                 <td>
                     <span th:if="${samochod.status == 'DOSTEPNY'}" class="badge bg-success">Dost臋pny</span>
                     <span th:if="${samochod.status == 'SPRZEDANY'}" class="badge bg-danger">Sprzedany</span>
                     <span th:if="${samochod.status == 'ZAREZERWOWANY'}" class="badge bg-warning">Zarezerwowany</span>
                 </td>
-
-                <!-- Akcje -->
                 <td>
-                    <div class="btn-group-vertical btn-group-sm">
-                        <!-- Przycisk szczeg贸艂贸w - dost臋pny dla wszystkich -->
-                        <a th:href="@{/samochody/szczegoly(id=${samochod.id})}"
-                           class="btn btn-outline-primary mb-1">
-                            <i class="fas fa-eye"></i> Szczeg贸艂y
-                        </a>
-
-                        <!-- Informacja o konieczno艣ci logowania dla akcji -->
-                        <div th:if="${samochod.status == 'DOSTEPNY'}">
-                            <a href="/login" class="btn btn-outline-warning btn-sm w-100 mb-1">
-                                <i class="fas fa-clock"></i> Zaloguj si臋 aby rezerwowa膰
-                            </a>
-                        </div>
-                        <div th:if="${samochod.status == 'ZAREZERWOWANY'}">
-                            <span class="badge bg-warning">Zarezerwowany</span>
-                        </div>
-                    </div>
+                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-eye"></i> Szczeg贸艂y
+                    </a>
                 </td>
             </tr>
             </tbody>
         </table>
     </div>
 
-    <!-- Przyciski nawigacyjne -->
     <div class="mt-4">
         <a href="/search" class="btn btn-primary">
-            <i class="fas fa-search me-1"></i> Nowe wyszukiwanie
+            <i class="fas fa-search me-1"></i> Zaawansowane wyszukiwanie
         </a>
         <a href="/samochody" class="btn btn-outline-secondary ms-2">
             <i class="fas fa-list me-1"></i> Wszystkie samochody
-        </a>
-        <a href="/" class="btn btn-outline-secondary ms-2">
-            <i class="fas fa-home me-1"></i> Strona g艂贸wna
         </a>
     </div>
 </div>
@@ -5953,119 +5511,124 @@ server:
 </html>
 
 
-孋IE疜A: src\main\resources\templates\stats\car-stats.html
--------------------------------------------------------------
+孋IE疜A: src\main\resources\templates\search\results.html
+------------------------------------------------------------
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
-    <title th:text="${tytul}">Statystyki samochod贸w</title>
+    <title>Wyniki wyszukiwania - Komis Samochodowy</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
-        <a class="navbar-brand" href="/">馃弫 Komis Samochodowy</a>
+        <a class="navbar-brand" href="/">馃殫 Komis Samochodowy</a>
         <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="/admin">Panel Admina</a>
+            <a class="nav-link" href="/search">Nowe wyszukiwanie</a>
+            <a class="nav-link" href="/samochody">Wszystkie samochody</a>
             <a class="nav-link" href="/">Strona g艂贸wna</a>
         </div>
     </div>
 </nav>
 
 <div class="container mt-4">
-    <h1 class="mb-4"><i class="fas fa-chart-bar me-2"></i>Statystyki samochod贸w</h1>
-
-    <!-- Statystyki og贸lne -->
-    <div class="row mb-4">
-        <div class="col-md-3 mb-3">
-            <div class="card text-white bg-primary">
-                <div class="card-body text-center">
-                    <i class="fas fa-car fa-2x mb-2"></i>
-                    <h3 th:text="${stats.totalCars}">0</h3>
-                    <p class="card-text">Wszystkich samochod贸w</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3 mb-3">
-            <div class="card text-white bg-success">
-                <div class="card-body text-center">
-                    <i class="fas fa-check-circle fa-2x mb-2"></i>
-                    <h3 th:text="${stats.availableCars}">0</h3>
-                    <p class="card-text">Dost臋pnych</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3 mb-3">
-            <div class="card text-white bg-warning">
-                <div class="card-body text-center">
-                    <i class="fas fa-clock fa-2x mb-2"></i>
-                    <h3 th:text="${stats.reservedCars}">0</h3>
-                    <p class="card-text">Zarezerwowanych</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3 mb-3">
-            <div class="card text-white bg-danger">
-                <div class="card-body text-center">
-                    <i class="fas fa-shopping-cart fa-2x mb-2"></i>
-                    <h3 th:text="${stats.soldCars}">0</h3>
-                    <p class="card-text">Sprzedanych</p>
-                </div>
-            </div>
-        </div>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1><i class="fas fa-search me-2"></i>Wyniki wyszukiwania</h1>
+        <span class="badge bg-primary fs-6" th:text="'Znaleziono: ' + ${resultsCount} + ' samochod贸w'"></span>
     </div>
 
-    <!-- 艢rednia cena -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-body text-center">
-                    <h4 class="text-success">
-                        <i class="fas fa-chart-line me-2"></i>
-                        艢rednia cena:
-                        <span th:text="${#numbers.formatDecimal(stats.avgPrice, 0, 'COMMA', 2, 'POINT') + ' z艂'}"></span>
-                    </h4>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Top marki -->
-    <div class="card">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="fas fa-trophy me-2"></i>Najpopularniejsze marki</h5>
+    <div class="card mb-4">
+        <div class="card-header bg-light">
+            <h5 class="mb-0">Kryteria wyszukiwania</h5>
         </div>
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped">
-                    <thead>
-                    <tr>
-                        <th>Marka</th>
-                        <th>Liczba samochod贸w</th>
-                        <th>艢rednia cena</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <tr th:each="brand : ${topBrands}">
-                        <td th:text="${brand.marka}"></td>
-                        <td th:text="${brand.carCount}"></td>
-                        <td th:text="${#numbers.formatDecimal(brand.avgPrice, 0, 'COMMA', 2, 'POINT') + ' z艂'}"></td>
-                    </tr>
-                    </tbody>
-                </table>
+            <div class="row">
+                <div class="col-md-3" th:if="${searchCriteria.marka}">
+                    <strong>Marka:</strong> <span th:text="${searchCriteria.marka}"></span>
+                </div>
+                <div class="col-md-3" th:if="${searchCriteria.model}">
+                    <strong>Model:</strong> <span th:text="${searchCriteria.model}"></span>
+                </div>
+                <div class="col-md-3" th:if="${searchCriteria.status}">
+                    <strong>Status:</strong> <span th:text="${searchCriteria.status}"></span>
+                </div>
+                <div class="col-md-3" th:if="${searchCriteria.rodzajPaliwa}">
+                    <strong>Paliwo:</strong> <span th:text="${searchCriteria.rodzajPaliwa}"></span>
+                </div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-3" th:if="${searchCriteria.minRok}">
+                    <strong>Rok od:</strong> <span th:text="${searchCriteria.minRok}"></span>
+                </div>
+                <div class="col-md-3" th:if="${searchCriteria.maxRok}">
+                    <strong>Rok do:</strong> <span th:text="${searchCriteria.maxRok}"></span>
+                </div>
+                <div class="col-md-3" th:if="${searchCriteria.minPrzebieg}">
+                    <strong>Przebieg od:</strong> <span th:text="${searchCriteria.minPrzebieg} + ' km'"></span>
+                </div>
+                <div class="col-md-3" th:if="${searchCriteria.maxPrzebieg}">
+                    <strong>Przebieg do:</strong> <span th:text="${searchCriteria.maxPrzebieg} + ' km'"></span>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Linki do innych raport贸w -->
+    <div th:if="${samochody.empty}" class="alert alert-info text-center">
+        <i class="fas fa-info-circle fa-2x mb-3"></i><br>
+        Nie znaleziono samochod贸w spe艂niaj膮cych podane kryteria.
+        <div class="mt-3">
+            <a href="/search" class="btn btn-primary me-2">Spr贸buj ponownie</a>
+            <a href="/samochody" class="btn btn-outline-primary">Zobacz wszystkie samochody</a>
+        </div>
+    </div>
+
+    <div th:if="${!samochody.empty}" class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+            <tr>
+                <th>Marka</th>
+                <th>Model</th>
+                <th>Rok</th>
+                <th>Przebieg</th>
+                <th>Paliwo</th>
+                <th>Cena</th>
+                <th>Status</th>
+                <th>Akcje</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="samochod : ${samochody}">
+                <td th:text="${samochod.marka}"></td>
+                <td th:text="${samochod.model}"></td>
+                <td th:text="${samochod.rokProdukcji}"></td>
+                <td th:text="${#numbers.formatInteger(samochod.przebieg, 0, 'COMMA') + ' km'}"></td>
+                <td th:text="${samochod.rodzajPaliwa}"></td>
+                <td>
+                    <strong th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' z艂'}"></strong>
+                </td>
+                <td>
+                    <span th:if="${samochod.status == 'DOSTEPNY'}" class="badge bg-success">Dost臋pny</span>
+                    <span th:if="${samochod.status == 'SPRZEDANY'}" class="badge bg-danger">Sprzedany</span>
+                    <span th:if="${samochod.status == 'ZAREZERWOWANY'}" class="badge bg-warning">Zarezerwowany</span>
+                </td>
+                <td>
+                    <a th:href="@{/samochody/szczegoly(id=${samochod.id})}" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-eye"></i> Szczeg贸艂y
+                    </a>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
     <div class="mt-4">
-        <a href="/stats/sales" class="btn btn-outline-primary">
-            <i class="fas fa-file-invoice-dollar me-1"></i> Raport sprzeda偶y
+        <a href="/search" class="btn btn-primary">
+            <i class="fas fa-search me-1"></i> Nowe wyszukiwanie
         </a>
-        <a href="/admin" class="btn btn-secondary ms-2">
-            <i class="fas fa-arrow-left me-1"></i> Powr贸t do panelu
+        <a href="/samochody" class="btn btn-outline-secondary ms-2">
+            <i class="fas fa-list me-1"></i> Wszystkie samochody
         </a>
     </div>
 </div>

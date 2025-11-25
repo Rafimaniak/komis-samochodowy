@@ -7,6 +7,8 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import pl.komis.model.User;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Repository
@@ -17,7 +19,25 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByUsername(String username);
     boolean existsByEmail(String email);
 
-    // Wywołanie PROCEDURY tworzenia użytkownika
+    // ==================== NOWE EFEKTYWNE METODY ====================
+
+    @Query("SELECT u FROM User u WHERE u.role = :role")
+    List<User> findByRole(@Param("role") String role);
+
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role = :role")
+    long countByRole(@Param("role") String role);
+
+    @Query("SELECT u FROM User u WHERE u.enabled = true")
+    List<User> findActiveUsers();
+
+    @Query("SELECT u FROM User u WHERE u.enabled = false")
+    List<User> findInactiveUsers();
+
+    @Query(value = "SELECT * FROM get_user_statistics()", nativeQuery = true)
+    Map<String, Object> getUserStatisticsNative();
+
+    // ==================== PROCEDURY ====================
+
     @Procedure(procedureName = "create_user")
     Long createUser(
             @Param("p_username") String username,
@@ -27,7 +47,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
             @Param("p_enabled") Boolean enabled
     );
 
-    // Wywołanie PROCEDURY aktualizacji użytkownika
     @Procedure(procedureName = "update_user")
     void updateUser(
             @Param("p_id") Long id,
@@ -38,7 +57,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
             @Param("p_enabled") Boolean enabled
     );
 
-    // Wywołanie PROCEDURY usuwania użytkownika
     @Procedure(procedureName = "delete_user")
     void deleteUser(@Param("p_id") Long id);
 }

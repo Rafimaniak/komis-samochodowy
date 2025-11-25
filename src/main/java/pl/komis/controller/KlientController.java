@@ -21,7 +21,7 @@ public class KlientController {
     @GetMapping("/klienci")
     public String listaKlientow(Model model) {
         // Pobierz wszystkich użytkowników z rolą USER
-        List<User> klienci = userService.findAll().stream()
+        List<User> klienci = userService.findAllUsers().stream()
                 .filter(user -> "USER".equals(user.getRole()))
                 .collect(Collectors.toList());
 

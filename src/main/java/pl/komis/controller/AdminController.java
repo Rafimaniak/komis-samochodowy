@@ -21,8 +21,8 @@ public class AdminController {
     @GetMapping
     public String adminPanel(Model model) {
         long totalUsers = userService.count();
-        long totalCars = samochodService.findAll().size();
-        long availableCars = samochodService.findByStatus("DOSTEPNY").size();
+        long totalCars = samochodService.count();
+        long availableCars = samochodService.countByStatus("DOSTEPNY");
 
         model.addAttribute("totalUsers", totalUsers);
         model.addAttribute("totalCars", totalCars);

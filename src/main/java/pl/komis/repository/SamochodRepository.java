@@ -27,6 +27,20 @@ public interface SamochodRepository extends JpaRepository<Samochod, Long> {
     List<Samochod> findByCenaBetween(@Param("minCena") BigDecimal minCena,
                                      @Param("maxCena") BigDecimal maxCena);
 
+    // ==================== NOWE EFEKTYWNE METODY ====================
+
+    @Query(value = "SELECT DISTINCT marka FROM samochody ORDER BY marka", nativeQuery = true)
+    List<String> findAllMarkiDistinct();
+
+    @Query("SELECT COUNT(s) FROM Samochod s WHERE s.status = :status")
+    long countByStatus(@Param("status") String status);
+
+    @Query(value = "SELECT * FROM get_car_statistics()", nativeQuery = true)
+    Map<String, Object> getCarStatistics();
+
+    @Query(value = "SELECT * FROM get_popular_brands(:limitCount)", nativeQuery = true)
+    List<Object[]> getPopularBrands(@Param("limitCount") Integer limitCount);
+
     // ==================== PROCEDURY CRUD ====================
 
     @Procedure(procedureName = "create_car")
@@ -63,7 +77,7 @@ public interface SamochodRepository extends JpaRepository<Samochod, Long> {
     @Procedure(procedureName = "delete_car")
     void deleteCar(@Param("p_id") Long id);
 
-    // ==================== ZAAWANSOWANE WYSZUKIWANIE - BEZPOŚREDNIE ZAPYTANIE SQL ====================
+    // ==================== ZAAWANSOWANE WYSZUKIWANIE ====================
 
     @Query(value = "SELECT s.* FROM samochody s " +
             "WHERE (:p_marka IS NULL OR LOWER(s.marka) = LOWER(:p_marka)) " +
@@ -119,21 +133,4 @@ public interface SamochodRepository extends JpaRepository<Samochod, Long> {
 
     @Procedure(procedureName = "cancel_reservation")
     Map<String, Object> cancelReservation(@Param("p_car_id") Long carId);
-
-    // ==================== FUNKCJE RAPORTOWANIA I STATYSTYK ====================
-
-    @Query(value = "SELECT * FROM get_available_cars()", nativeQuery = true)
-    List<Object[]> getAvailableCars();
-
-    @Query(value = "SELECT * FROM get_car_stats()", nativeQuery = true)
-    Map<String, Object> getCarStatistics();
-
-    @Query(value = "SELECT * FROM get_top_brands(:limit_count)", nativeQuery = true)
-    List<Object[]> getTopBrands(@Param("limit_count") Integer limitCount);
-
-    @Query(value = "SELECT * FROM get_monthly_sales_report_func(:p_year, :p_month)", nativeQuery = true)
-    List<Object[]> getMonthlySalesReport(
-            @Param("p_year") Integer year,
-            @Param("p_month") Integer month
-    );
 }

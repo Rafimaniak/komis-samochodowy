@@ -7,8 +7,8 @@ import org.springframework.stereotype.Service;
 import pl.komis.model.User;
 import pl.komis.repository.UserRepository;
 
-import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -95,13 +95,7 @@ public class UserService {
 
     // ==================== METODY ODCZYTU ====================
 
-    public List<User> findAll() {
-        return userRepository.findAll();
-    }
-
-    public List<User> findAllUsers() {
-        return userRepository.findAll();
-    }
+    public List<User> findAllUsers() { return userRepository.findAll(); }
 
     public Optional<User> findById(Long id) {
         return userRepository.findById(id);
@@ -291,41 +285,29 @@ public class UserService {
     }
 
     public long countByRole(String role) {
-        return userRepository.findAll().stream()
-                .filter(user -> role.equals(user.getRole()))
-                .count();
+        return userRepository.countByRole(role);
     }
 
     public long countActiveUsers() {
-        return userRepository.findAll().stream()
-                .filter(User::getEnabled)
-                .count();
+        return userRepository.findActiveUsers().size();
     }
 
     public long countInactiveUsers() {
-        return userRepository.findAll().stream()
-                .filter(user -> !user.getEnabled())
-                .count();
+        return userRepository.findInactiveUsers().size();
     }
 
     // ==================== METODY SPECJALNE ====================
 
     public List<User> findByRole(String role) {
-        return userRepository.findAll().stream()
-                .filter(user -> role.equals(user.getRole()))
-                .collect(Collectors.toList());
+        return userRepository.findByRole(role);
     }
 
     public List<User> findActiveUsers() {
-        return userRepository.findAll().stream()
-                .filter(User::getEnabled)
-                .collect(Collectors.toList());
+        return userRepository.findActiveUsers();
     }
 
     public List<User> findInactiveUsers() {
-        return userRepository.findAll().stream()
-                .filter(user -> !user.getEnabled())
-                .collect(Collectors.toList());
+        return userRepository.findInactiveUsers();
     }
 
     public List<User> findAdmins() {
@@ -395,19 +377,20 @@ public class UserService {
     // ==================== METODY RAPORTOWANIA ====================
 
     public UserStatistics getUserStatistics() {
-        long totalUsers = count();
-        long activeUsers = countActiveUsers();
-        long inactiveUsers = countInactiveUsers();
-        long adminUsers = countByRole("ADMIN");
-        long regularUsers = countByRole("USER");
+        Map<String, Object> stats = userRepository.getUserStatisticsNative();
 
-        return new UserStatistics(totalUsers, activeUsers, inactiveUsers, adminUsers, regularUsers);
+        return new UserStatistics(
+                ((Number) stats.get("total_users")).longValue(),
+                ((Number) stats.get("active_users")).longValue(),
+                ((Number) stats.get("inactive_users")).longValue(),
+                ((Number) stats.get("admin_users")).longValue(),
+                ((Number) stats.get("regular_users")).longValue()
+        );
     }
 
     // Klasa pomocnicza dla statystyk
     @Getter
     public static class UserStatistics {
-        // Gettery
         private final long totalUsers;
         private final long activeUsers;
         private final long inactiveUsers;
@@ -421,6 +404,5 @@ public class UserService {
             this.adminUsers = adminUsers;
             this.regularUsers = regularUsers;
         }
-
     }
 }

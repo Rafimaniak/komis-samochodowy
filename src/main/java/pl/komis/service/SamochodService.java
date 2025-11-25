@@ -1,6 +1,5 @@
 package pl.komis.service;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -22,7 +21,7 @@ public class SamochodService {
 
     private final SamochodRepository samochodRepository;
 
-    // ==================== PODSTAWOWE OPERACJE CRUD PRZEZ PROCEDURY ====================
+    // ==================== PODSTAWOWE OPERACJE CRUD ====================
 
     @Transactional(readOnly = true)
     public List<Samochod> findAll() {
@@ -36,7 +35,7 @@ public class SamochodService {
 
     @Transactional
     public Samochod save(Samochod samochod) {
-        // Ustaw domyślne wartości jeśli potrzebne
+        // Ustaw domyślne wartości jeżeli potrzebne
         if (samochod.getDataDodania() == null) {
             samochod.setDataDodania(LocalDate.now());
         }
@@ -108,7 +107,7 @@ public class SamochodService {
         samochodRepository.deleteCar(id);
     }
 
-    // ==================== ZAAWANSOWANE WYSZUKIWANIE PRZEZ BEZPOŚREDNIE ZAPYTANIE SQL ====================
+    // ==================== ZAAWANSOWANE WYSZUKIWANIE ====================
 
     @Transactional(readOnly = true)
     public List<Samochod> searchCars(SearchCriteria criteria) {
@@ -142,7 +141,7 @@ public class SamochodService {
         return samochodRepository.searchCarsSimple(searchMarka, searchModel, searchStatus);
     }
 
-    // ==================== OPERACJE BIZNESOWE PRZEZ PROCEDURY ====================
+    // ==================== OPERACJE BIZNESOWE ====================
 
     @Transactional
     public Map<String, Object> reserveCar(Long carId, Long userId) {
@@ -171,60 +170,6 @@ public class SamochodService {
         }
     }
 
-    // ==================== RAPORTY I STATYSTYKI PRZEZ FUNKCJE ====================
-
-    @Transactional(readOnly = true)
-    public List<Samochod> getAvailableCars() {
-        try {
-            List<Object[]> results = samochodRepository.getAvailableCars();
-            return results.stream()
-                    .map(this::mapToSamochodFromArray)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            throw new RuntimeException("Błąd podczas pobierania dostępnych samochodów: " + e.getMessage());
-        }
-    }
-
-    @Transactional(readOnly = true)
-    public CarStatistics getCarStatistics() {
-        try {
-            Map<String, Object> stats = samochodRepository.getCarStatistics();
-            return new CarStatistics(
-                    ((Number) stats.get("total_cars")).longValue(),
-                    ((Number) stats.get("available_cars")).longValue(),
-                    ((Number) stats.get("sold_cars")).longValue(),
-                    ((Number) stats.get("reserved_cars")).longValue(),
-                    (BigDecimal) stats.get("avg_price")
-            );
-        } catch (Exception e) {
-            throw new RuntimeException("Błąd podczas pobierania statystyk: " + e.getMessage());
-        }
-    }
-
-    @Transactional(readOnly = true)
-    public List<BrandStatistics> getTopBrands(Integer limitCount) {
-        try {
-            List<Object[]> results = samochodRepository.getTopBrands(limitCount != null ? limitCount : 5);
-            return results.stream()
-                    .map(this::mapToBrandStatistics)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            throw new RuntimeException("Błąd podczas pobierania top marek: " + e.getMessage());
-        }
-    }
-
-    @Transactional(readOnly = true)
-    public List<MonthlySales> getMonthlySalesReport(Integer year, Integer month) {
-        try {
-            List<Object[]> results = samochodRepository.getMonthlySalesReport(year, month);
-            return results.stream()
-                    .map(this::mapToMonthlySales)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            throw new RuntimeException("Błąd podczas pobierania raportu sprzedaży: " + e.getMessage());
-        }
-    }
-
     // ==================== METODY POMOCNICZE ====================
 
     @Transactional(readOnly = true)
@@ -248,20 +193,13 @@ public class SamochodService {
     }
 
     @Transactional(readOnly = true)
-    public List<Samochod> findByCenaBetween(double min, double max) {
-        BigDecimal minCena = BigDecimal.valueOf(min);
-        BigDecimal maxCena = BigDecimal.valueOf(max);
-        return samochodRepository.findByCenaBetween(minCena, maxCena);
-    }
-
-    @Transactional(readOnly = true)
     public long count() {
         return samochodRepository.count();
     }
 
     @Transactional(readOnly = true)
     public long countByStatus(String status) {
-        return samochodRepository.findByStatus(status).size();
+        return samochodRepository.countByStatus(status);
     }
 
     @Transactional(readOnly = true)
@@ -310,42 +248,19 @@ public class SamochodService {
 
     @Transactional(readOnly = true)
     public List<String> findAllMarki() {
-        return samochodRepository.findAll().stream()
-                .map(Samochod::getMarka)
-                .distinct()
-                .collect(Collectors.toList());
+        return samochodRepository.findAllMarkiDistinct();
     }
 
-    // ==================== METODY MAPUJĄCE ====================
+    // ==================== NOWE METODY DLA STATYSTYK ====================
 
-    private Samochod mapToSamochodFromArray(Object[] result) {
-        Samochod samochod = new Samochod();
-        samochod.setId(((Number) result[0]).longValue());
-        samochod.setMarka((String) result[1]);
-        samochod.setModel((String) result[2]);
-        samochod.setRokProdukcji(((Number) result[3]).intValue());
-        samochod.setCena((BigDecimal) result[4]);
-        samochod.setStatus((String) result[5]);
-        return samochod;
+    @Transactional(readOnly = true)
+    public Map<String, Object> getCarStatistics() {
+        return samochodRepository.getCarStatistics();
     }
 
-    private BrandStatistics mapToBrandStatistics(Object[] result) {
-        return new BrandStatistics(
-                (String) result[0],
-                ((Number) result[1]).longValue(),
-                (BigDecimal) result[2]
-        );
-    }
-
-    private MonthlySales mapToMonthlySales(Object[] result) {
-        return new MonthlySales(
-                ((java.sql.Date) result[0]).toLocalDate(),
-                (String) result[1],
-                (String) result[2],
-                (BigDecimal) result[3],
-                (String) result[4],
-                (String) result[5]
-        );
+    @Transactional(readOnly = true)
+    public List<Object[]> getPopularBrands(Integer limit) {
+        return samochodRepository.getPopularBrands(limit);
     }
 
     // ==================== KLASY POMOCNICZE ====================
@@ -362,34 +277,5 @@ public class SamochodService {
         private BigDecimal maxCena;
         private String rodzajPaliwa;
         private String status;
-    }
-
-    @Data
-    @AllArgsConstructor
-    public static class CarStatistics {
-        private Long totalCars;
-        private Long availableCars;
-        private Long soldCars;
-        private Long reservedCars;
-        private BigDecimal avgPrice;
-    }
-
-    @Data
-    @AllArgsConstructor
-    public static class BrandStatistics {
-        private String marka;
-        private Long carCount;
-        private BigDecimal avgPrice;
-    }
-
-    @Data
-    @AllArgsConstructor
-    public static class MonthlySales {
-        private LocalDate dataZakupu;
-        private String marka;
-        private String model;
-        private BigDecimal cenaZakupu;
-        private String klient;
-        private String pracownik;
     }
 }

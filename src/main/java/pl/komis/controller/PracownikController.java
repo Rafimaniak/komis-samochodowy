@@ -21,7 +21,7 @@ public class PracownikController {
     @GetMapping("/pracownicy")
     public String listaPracownikow(Model model) {
         // Pobierz wszystkich użytkowników z rolą ADMIN
-        List<User> pracownicy = userService.findAll().stream()
+        List<User> pracownicy = userService.findAllUsers().stream()
                 .filter(user -> "ADMIN".equals(user.getRole()))
                 .collect(Collectors.toList());
 

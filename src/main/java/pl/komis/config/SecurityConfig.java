@@ -25,7 +25,6 @@ public class SecurityConfig {
                         // Strony publiczne - dostępne bez logowania
                         .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/**",
                                 "/samochody", "/samochody/szczegoly", "/register",
-                                "/generate-password", "/test-passwords",
                                 "/search", "/search/**", "/search/quick", "/search/quick/**").permitAll() // DODANO BRAKUJĄCE ENDPOINTY
 
                         // Strony admina - wymagają roli ADMIN
