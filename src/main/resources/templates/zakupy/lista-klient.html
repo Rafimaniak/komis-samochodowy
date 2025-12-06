@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <title>Moje Zakupy</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<div th:replace="fragments/navbar :: main-nav"></div>
+
+<div class="container mt-4">
+    <h1 class="mb-4"><i class="fas fa-history"></i> Moje Zakupy</h1>
+
+    <div class="alert alert-info mb-4">
+        <i class="fas fa-info-circle"></i> Widzisz tutaj tylko samochody, które kupiłeś/aś w naszym komisie.
+        <span sec:authorize="hasRole('ADMIN')" class="fw-bold">
+            Jako administrator widzisz swoje prywatne zakupy.
+        </span>
+    </div>
+
+    <!-- Informacja o rabacie klienta -->
+    <div sec:authorize="isAuthenticated() and !hasRole('ADMIN')" class="alert alert-warning mb-4">
+        <div class="d-flex align-items-center">
+            <i class="fas fa-percentage fa-2x me-3"></i>
+            <div>
+                <strong>Twój aktualny rabat na następny zakup:
+                    <span th:if="${klientRabat != null}"
+                          class="badge bg-success fs-5"
+                          th:text="${klientRabat} + '%'"></span>
+                    <span th:if="${klientRabat == null}"
+                          class="badge bg-secondary fs-5">0%</span>
+                </strong>
+                <div class="mt-1">
+                    <small>
+                        <strong>System rabatów:</strong><br>
+                        • 0% - pierwszy zakup<br>
+                        • 5% - drugi zakup<br>
+                        • 10% - trzeci i czwarty zakup<br>
+                        • 15% - piąty i kolejne zakupy
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div th:if="${zakupy.empty}" class="alert alert-warning">
+        <i class="fas fa-exclamation-triangle"></i> Nie masz jeszcze żadnych zakupów.
+        <br>
+        <small>Po zakupie samochodu pojawi się on tutaj.</small>
+    </div>
+
+    <div th:unless="${zakupy.empty}" class="row">
+        <div th:each="z : ${zakupy}" class="col-md-6 mb-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0" th:text="${z.samochod.marka + ' ' + z.samochod.model}"></h5>
+                        <span th:if="${z.zastosowanyRabat > 0}"
+                              class="badge bg-success fs-6"
+                              th:text="'-' + ${z.zastosowanyRabat} + '%'">
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <img th:if="${z.samochod.zdjecieUrl != null and z.samochod.zdjecieUrl != ''}"
+                                 th:src="${z.samochod.zdjecieUrl}"
+                                 th:alt="${z.samochod.marka + ' ' + z.samochod.model}"
+                                 class="img-fluid rounded mb-3" style="max-height: 150px; width: 100%; object-fit: cover;">
+                            <div th:if="${z.samochod.zdjecieUrl == null or z.samochod.zdjecieUrl == ''}"
+                                 class="text-center py-4 bg-light rounded mb-3">
+                                <i class="fas fa-car fa-3x text-muted"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <small class="text-muted">Rok:</small><br>
+                            <strong th:text="${z.samochod.rokProdukcji}"></strong>
+                        </div>
+                        <div class="col-6">
+                            <small class="text-muted">Przebieg:</small><br>
+                            <strong th:text="${#numbers.formatInteger(z.samochod.przebieg, 0, 'COMMA') + ' km'}"></strong>
+                        </div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <small class="text-muted">Paliwo:</small><br>
+                            <strong th:text="${z.samochod.rodzajPaliwa}"></strong>
+                        </div>
+                        <div class="col-6">
+                            <small class="text-muted">Skrzynia:</small><br>
+                            <strong th:text="${z.samochod.skrzyniaBiegow}"></strong>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="row mb-2">
+                        <div class="col-12">
+                            <small class="text-muted">Data zakupu:</small><br>
+                            <strong th:text="${#temporals.format(z.dataZakupu, 'dd.MM.yyyy')}"></strong>
+                        </div>
+                    </div>
+
+                    <!-- Wyświetlanie ceny i rabatu -->
+                    <div class="row mt-2">
+                        <div class="col-12">
+                            <small class="text-muted">Cena zakupu:</small><br>
+
+                            <!-- Jeśli był rabat, pokaż oryginalną cenę przekreśloną i cenę po rabacie -->
+                            <div th:if="${z.cenaBazowa != null and z.cenaBazowa != z.cenaZakupu}">
+                                <div class="mb-1">
+                                    <del class="text-muted"
+                                         th:text="${#numbers.formatDecimal(z.cenaBazowa, 0, 2, 'POINT') + ' zł'}">
+                                    </del>
+                                </div>
+                                <div>
+                                    <span class="badge bg-success fs-5"
+                                          th:text="${#numbers.formatDecimal(z.cenaZakupu, 0, 2, 'POINT') + ' zł'}">
+                                    </span>
+                                </div>
+                                <div class="mt-1">
+                                    <small class="text-success">
+                                        <i class="fas fa-coins"></i> Zaoszczędziłeś/aś:
+                                        <strong th:text="${#numbers.formatDecimal(z.cenaBazowa - z.cenaZakupu, 0, 2, 'POINT') + ' zł'}"></strong>
+                                    </small>
+                                </div>
+                            </div>
+
+                            <!-- Jeśli nie było rabatu, pokaż tylko cenę -->
+                            <div th:unless="${z.cenaBazowa != null and z.cenaBazowa != z.cenaZakupu}">
+                                <span class="badge bg-success fs-5"
+                                      th:text="${#numbers.formatDecimal(z.cenaZakupu, 0, 2, 'POINT') + ' zł'}">
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div th:if="${z.pracownik != null}" class="row mt-3">
+                        <div class="col-12">
+                            <small class="text-muted">Sprzedawca:</small><br>
+                            <strong th:text="${z.pracownik.imie + ' ' + z.pracownik.nazwisko}"></strong>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer text-muted">
+                    <small>
+                        <i class="far fa-clock"></i> Zakupiono:
+                        <span th:text="${#temporals.format(z.dataZakupu, 'dd.MM.yyyy HH:mm')}"></span>
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a th:href="@{/}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Powrót do strony głównej
+        </a>
+        <a th:href="@{/samochody}" class="btn btn-primary ms-2">
+            <i class="fas fa-car"></i> Przeglądaj samochody
+        </a>
+        <a sec:authorize="hasRole('ADMIN')" th:href="@{/zakupy/rabaty}" class="btn btn-info ms-2">
+            <i class="fas fa-percentage"></i> Raport rabatów
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

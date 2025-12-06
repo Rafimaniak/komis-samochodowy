@@ -1,9 +1,20 @@
 package pl.komis.model;
 
 import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
+import org.hibernate.annotations.DynamicUpdate;
+
+import java.math.BigDecimal;
 import java.util.List;
 
 @Entity
+@Table(name = "klient")
+@DynamicUpdate
+@Getter
+@Setter  // ZAMIENIAMY RĘCZNE GETTERY/SETTERY NA LOMBOK
+@AllArgsConstructor
 public class Klient {
 
     @Id
@@ -18,9 +29,16 @@ public class Klient {
     @OneToMany(mappedBy = "klient", cascade = CascadeType.ALL)
     private List<Zakup> zakupy;
 
+    // NOWE POLA DO OBSŁUGI SYSTEMU RABATOWEGO
+    @Column(name = "liczba_zakupow")
+    private Integer liczbaZakupow = 0;
+
+    @Column(name = "aktualny_rabat", precision = 5, scale = 2)
+    private BigDecimal aktualnyRabat = BigDecimal.ZERO;
+
     public Klient() {}
 
-    // --- Gettery i settery ---
+    // --- GETTERY I SETTERY ---
     public Long getId() {
         return id;
     }
@@ -67,5 +85,21 @@ public class Klient {
 
     public void setZakupy(List<Zakup> zakupy) {
         this.zakupy = zakupy;
+    }
+
+    public Integer getLiczbaZakupow() {
+        return liczbaZakupow;
+    }
+
+    public void setLiczbaZakupow(Integer liczbaZakupow) {
+        this.liczbaZakupow = liczbaZakupow;
+    }
+
+    public BigDecimal getAktualnyRabat() {
+        return aktualnyRabat;
+    }
+
+    public void setAktualnyRabat(BigDecimal aktualnyRabat) {
+        this.aktualnyRabat = aktualnyRabat;
     }
 }

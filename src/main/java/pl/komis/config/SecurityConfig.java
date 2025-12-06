@@ -25,13 +25,16 @@ public class SecurityConfig {
                         // Strony publiczne - dostępne bez logowania
                         .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/**",
                                 "/samochody", "/samochody/szczegoly", "/register",
-                                "/search", "/search/**", "/search/quick", "/search/quick/**").permitAll() // DODANO BRAKUJĄCE ENDPOINTY
+                                "/search", "/search/**", "/search/quick", "/search/quick/**").permitAll()
 
                         // Strony admina - wymagają roli ADMIN
                         .requestMatchers("/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/klienci", "/pracownicy").hasRole("ADMIN")
+                        .requestMatchers("/klienci", "/pracownicy", "/serwis", "/serwis/**").hasRole("ADMIN")  // DODAJ SERWIS
                         .requestMatchers("/samochody/nowy", "/samochody/edytuj/**",
                                 "/samochody/zapisz", "/samochody/usun/**").hasRole("ADMIN")
+
+                        .requestMatchers("/zakupy").hasRole("ADMIN") // Pełna lista tylko dla admina
+                        .requestMatchers("/zakupy/moje").authenticated() // Każdy zalogowany widzi swoje
 
                         // Wszystkie inne strony wymagają logowania
                         .anyRequest().authenticated()

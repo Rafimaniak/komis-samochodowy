@@ -2,11 +2,13 @@ package pl.komis.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
-import pl.komis.model.Samochod;
-import pl.komis.service.SamochodService;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+import pl.komis.model.*;
+import pl.komis.service.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -18,6 +20,10 @@ import java.util.List;
 public class SamochodController {
 
     private final SamochodService samochodService;
+    private final UserService userService;
+    private final KlientService klientService;
+    private final PracownikService pracownikService;
+    private final ZakupService zakupService;
 
     // Widok listy samochodów z wyszukiwarką
     @GetMapping
@@ -172,15 +178,127 @@ public class SamochodController {
     // Zakup samochodu - dla zalogowanych użytkowników
     @PostMapping("/kup")
     @PreAuthorize("isAuthenticated()")
-    public String kupSamochod(@RequestParam("id") Long id) {
+    public String kupSamochod(
+            @RequestParam("id") Long id,
+            Authentication authentication,
+            RedirectAttributes redirectAttributes) {
+
+        System.out.println("=== ROZPOCZĘCIE ZAKUPU SAMOCHODU ID: " + id + " ===");
+
         Samochod samochod = samochodService.findById(id)
                 .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+        System.out.println("Znaleziono samochód: " + samochod.getMarka() + " " + samochod.getModel());
+        System.out.println("Status przed zakupem: " + samochod.getStatus());
+
+        // Pobierz aktualnego użytkownika
+        String username = authentication.getName();
+        User user = userService.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        System.out.println("Użytkownik: " + user.getUsername() + ", rola: " + user.getRole());
 
         if ("DOSTEPNY".equals(samochod.getStatus()) || "ZAREZERWOWANY".equals(samochod.getStatus())) {
             samochod.setStatus("SPRZEDANY");
             samochodService.save(samochod);
+
+            System.out.println("Status zmieniony na: SPRZEDANY");
+
+            try {
+                // ============================================
+                // TWORZENIE REKORDU ZAKUPU W BAZIE DANYCH
+                // ============================================
+
+                // 1. Znajdź lub utwórz klienta
+                Klient klient = null;
+
+                // Sprawdź czy użytkownik ma powiązanego klienta
+                if (user.getKlient() != null) {
+                    klient = user.getKlient();
+                    System.out.println("Użytkownik ma powiązanego klienta: " + klient.getImie() + " " + klient.getNazwisko());
+                } else {
+                    // Spróbuj znaleźć klienta po emailu
+                    klient = klientService.findByEmail(user.getEmail())
+                            .orElse(null);
+
+                    if (klient == null) {
+                        // Utwórz nowego klienta na podstawie danych użytkownika
+                        System.out.println("Tworzę nowego klienta dla użytkownika: " + user.getUsername());
+                        klient = new Klient();
+                        klient.setImie(extractFirstName(user.getUsername()));
+                        klient.setNazwisko(extractLastName(user.getUsername()));
+                        klient.setEmail(user.getEmail());
+                        klient.setTelefon("Nie podano");
+                        klient = klientService.save(klient);
+                        System.out.println("Utworzono nowego klienta: " + klient.getImie() + " " + klient.getNazwisko());
+                    }
+
+                    // POWIĄŻ KLIENTA Z UŻYTKOWNIKIEM
+                    user.setKlient(klient);
+                    userService.updateUser(user);
+                    System.out.println("Powiązano klienta z użytkownikiem");
+                }
+
+                // 2. Znajdź pracownika (domyślnie pierwszy z bazy)
+                Pracownik pracownik = null;
+                List<Pracownik> wszyscyPracownicy = pracownikService.findAll();
+                if (!wszyscyPracownicy.isEmpty()) {
+                    pracownik = wszyscyPracownicy.get(0);
+                    System.out.println("Użyto pracownika: " + pracownik.getImie() + " " + pracownik.getNazwisko());
+                } else {
+                    // Utwórz domyślnego pracownika
+                    System.out.println("Brak pracowników w bazie - tworzę domyślnego...");
+                    Pracownik nowyPracownik = new Pracownik();
+                    nowyPracownik.setImie("Pracownik");
+                    nowyPracownik.setNazwisko("Domyślny");
+                    nowyPracownik.setStanowisko("Sprzedawca");
+                    nowyPracownik.setEmail("pracownik@komis.pl");
+                    nowyPracownik.setTelefon("111-222-333");
+                    nowyPracownik.setDataZatrudnienia(LocalDate.now());
+                    pracownik = pracownikService.save(nowyPracownik);
+                    System.out.println("Utworzono nowego pracownika: " + pracownik.getImie() + " " + pracownik.getNazwisko());
+                }
+
+                // 3. Stwórz obiekt Zakup
+                Zakup zakup = new Zakup();
+                zakup.setSamochod(samochod);
+                zakup.setKlient(klient);
+                zakup.setPracownik(pracownik);
+                zakup.setDataZakupu(LocalDate.now());
+                zakup.setCenaZakupu(samochod.getCena());
+
+                System.out.println("Tworzę zakup z danymi:");
+                System.out.println("- Samochód: " + samochod.getMarka() + " " + samochod.getModel());
+                System.out.println("- Klient: " + klient.getImie() + " " + klient.getNazwisko());
+                System.out.println("- Pracownik: " + pracownik.getImie() + " " + pracownik.getNazwisko());
+                System.out.println("- Cena: " + samochod.getCena());
+                System.out.println("- Data: " + LocalDate.now());
+
+                // 4. Zapisz zakup w bazie
+                Zakup zapisanyZakup = zakupService.save(zakup);
+                System.out.println("Zakup zapisany w bazie! ID: " + zapisanyZakup.getId());
+
+                if (user.getRole().equals("ADMIN")) {
+                    redirectAttributes.addFlashAttribute("successMessage",
+                            "Samochód sprzedany i zakup zarejestrowany w systemie!");
+                } else {
+                    redirectAttributes.addFlashAttribute("successMessage",
+                            "Samochód kupiony! Zakup zarejestrowany w systemie.");
+                }
+
+            } catch (Exception e) {
+                System.err.println("BŁĄD podczas tworzenia zakupu: " + e.getMessage());
+                e.printStackTrace();
+                redirectAttributes.addFlashAttribute("errorMessage",
+                        "Samochód oznaczony jako sprzedany, ale wystąpił błąd przy rejestracji zakupu: " + e.getMessage());
+            }
+        } else {
+            System.out.println("Samochód nie jest dostępny do sprzedaży. Aktualny status: " + samochod.getStatus());
+            redirectAttributes.addFlashAttribute("errorMessage",
+                    "Nie można kupić samochodu. Aktualny status: " + samochod.getStatus());
         }
 
+        System.out.println("=== ZAKOŃCZENIE ZAKUPU ===");
         return "redirect:/samochody/szczegoly?id=" + id;
     }
 
@@ -197,5 +315,25 @@ public class SamochodController {
         }
 
         return "redirect:/samochody/szczegoly?id=" + id;
+    }
+
+    // Pomocnicze metody do ekstrakcji imienia i nazwiska z username
+    private String extractFirstName(String username) {
+        if (username == null || username.isEmpty()) return "Użytkownik";
+        String[] parts = username.split("\\.");
+        if (parts.length > 0) return capitalize(parts[0]);
+        return capitalize(username);
+    }
+
+    private String extractLastName(String username) {
+        if (username == null || username.isEmpty()) return "Klient";
+        String[] parts = username.split("\\.");
+        if (parts.length > 1) return capitalize(parts[1]);
+        return "Klient";
+    }
+
+    private String capitalize(String str) {
+        if (str == null || str.isEmpty()) return str;
+        return str.substring(0, 1).toUpperCase() + str.substring(1).toLowerCase();
     }
 }

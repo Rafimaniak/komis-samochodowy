@@ -1,11 +1,20 @@
 package pl.komis.controller;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
+import pl.komis.model.User;
 import pl.komis.model.Zakup;
 import pl.komis.service.*;
+import pl.komis.model.Klient;
+import pl.komis.service.KlientService;
+
+import java.math.BigDecimal;
+import java.util.List;
 
 @Controller
 @RequestMapping("/zakupy")
@@ -13,51 +22,116 @@ import pl.komis.service.*;
 public class ZakupController {
 
     private final ZakupService zakupService;
-    private final SamochodService samochodService;
+    private final UserService userService;
     private final KlientService klientService;
-    private final PracownikService pracownikService;
 
+    @GetMapping("/rabaty")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String listaRabatow(Model model) {
+        List<Klient> klienci = klientService.findAll();
+
+        // Statystyki
+        int totalZakupy = klienci.stream()
+                .mapToInt(k -> k.getZakupy() != null ? k.getZakupy().size() : 0)
+                .sum();
+
+        double sredniRabat = klienci.stream()
+                .mapToDouble(k -> k.getAktualnyRabat() != null ? k.getAktualnyRabat().doubleValue() : 0)
+                .average()
+                .orElse(0.0);
+
+        BigDecimal totalZaoszczedzone = klienci.stream()
+                .filter(k -> k.getZakupy() != null)
+                .flatMap(k -> k.getZakupy().stream())
+                .filter(z -> z.getCenaBazowa() != null && z.getCenaZakupu() != null)
+                .map(z -> z.getCenaBazowa().subtract(z.getCenaZakupu()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        model.addAttribute("klienci", klienci);
+        model.addAttribute("totalZakupy", totalZakupy);
+        model.addAttribute("sredniRabat", String.format("%.1f", sredniRabat));
+        model.addAttribute("totalZaoszczedzone", totalZaoszczedzone);
+        model.addAttribute("tytul", "Raporty rabatowe klientów");
+        return "zakupy/rabaty";
+    }
+
+    // Dla admina: pełna lista zakupów
     @GetMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public String listZakupy(Model model) {
-        model.addAttribute("zakupy", zakupService.findAll());
-        model.addAttribute("tytul", "Lista Zakupów");
-        return "zakupy_lista";
+        List<Zakup> zakupy = zakupService.findAll();
+        System.out.println("DEBUG: Pobrano " + zakupy.size() + " zakupów");
+        model.addAttribute("zakupy", zakupy);
+        model.addAttribute("tytul", "Lista Wszystkich Zakupów");
+        return "zakupy/lista-admin";
     }
 
-    @GetMapping("/dodaj")
-    public String showAddForm(Model model) {
-        model.addAttribute("zakup", new Zakup());
-        model.addAttribute("samochody", samochodService.findAll());
-        model.addAttribute("klienci", klientService.findAll());
-        model.addAttribute("pracownicy", pracownikService.findAll());
-        return "zakupy_form";
+    // Dla użytkownika: tylko jego zakupy
+    @GetMapping("/moje")
+    @PreAuthorize("isAuthenticated()")
+    public String mojeZakupy(Authentication authentication, Model model) {
+        String username = authentication.getName();
+
+        System.out.println("DEBUG: Użytkownik próbuje zobaczyć swoje zakupy: " + username);
+
+        try {
+            User user = userService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            System.out.println("DEBUG: Znaleziono użytkownika: " + user.getUsername());
+            System.out.println("DEBUG: Email: " + user.getEmail());
+            System.out.println("DEBUG: Rola: " + user.getRole());
+            System.out.println("DEBUG: Klient ID: " + (user.getKlient() != null ? user.getKlient().getId() : "NULL"));
+
+            List<Zakup> zakupy;
+
+            // Jeżeli użytkownik ma powiązanego klienta
+            if (user.getKlient() != null) {
+                Long klientId = user.getKlient().getId();
+                System.out.println("DEBUG: Szukam zakupów dla klienta ID: " + klientId);
+                zakupy = zakupService.findByKlientId(klientId);
+                System.out.println("DEBUG: Znaleziono " + zakupy.size() + " zakupów dla klienta");
+            } else {
+                // Jeżeli użytkownik NIE ma klienta, spróbuj znaleźć zakupy po emailu
+                System.out.println("DEBUG: Użytkownik nie ma powiązanego klienta, szukam po emailu: " + user.getEmail());
+                zakupy = findZakupyByUserEmail(user.getEmail());
+                System.out.println("DEBUG: Znaleziono " + zakupy.size() + " zakupów po emailu");
+            }
+
+            model.addAttribute("zakupy", zakupy);
+            model.addAttribute("tytul", "Moje Zakupy");
+            model.addAttribute("username", username);
+            return "zakupy/lista-klient";
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD w mojeZakupy: " + e.getMessage());
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupów: " + e.getMessage());
+            return "error"; // lub przekieruj na stronę błędu
+        }
     }
 
-    @PostMapping("/dodaj")
-    public String addZakup(@ModelAttribute Zakup zakup) {
-        zakupService.save(zakup);
-        return "redirect:/zakupy";
+    // Pomocnicza metoda do znajdowania zakupów po emailu klienta
+    private List<Zakup> findZakupyByUserEmail(String email) {
+        // Najpierw znajdź klienta po emailu
+        return klientService.findByEmail(email)
+                .map(klient -> zakupService.findByKlientId(klient.getId()))
+                .orElse(List.of());
     }
 
-    @GetMapping("/edytuj/{id}")
-    public String editZakup(@PathVariable Long id, Model model) {
-        model.addAttribute("zakup", zakupService.getById(id));
-        model.addAttribute("samochody", samochodService.findAll());
-        model.addAttribute("klienci", klientService.findAll());
-        model.addAttribute("pracownicy", pracownikService.findAll());
-        return "zakupy_form";
-    }
-
-    @PostMapping("/edytuj/{id}")
-    public String updateZakup(@PathVariable Long id, @ModelAttribute Zakup zakup) {
-        zakup.setId(id);
-        zakupService.save(zakup);
-        return "redirect:/zakupy";
-    }
-
-    @GetMapping("/usun/{id}")
+    // Usuwanie tylko dla admina
+    @PostMapping("/usun/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public String deleteZakup(@PathVariable Long id) {
         zakupService.remove(id);
         return "redirect:/zakupy";
     }
+//    @GetMapping("/generate-hash")
+//    @ResponseBody
+//    public String generateHash() {
+//        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+//        String hash = encoder.encode("testowy123");
+//        return "Hash dla 'testowy123': " + hash +
+//                "<br><br>SQL: UPDATE users SET password = '" + hash + "' WHERE username = 'testowy';";
+//    }
 }
