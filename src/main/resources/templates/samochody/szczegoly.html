@@ -137,8 +137,34 @@
             <div class="card sticky-top" style="top: 20px;">
                 <div class="card-body text-center">
                     <h3 th:text="${samochod.marka + ' ' + samochod.model}"></h3>
-                    <div class="price-tag mb-3" th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zł'}"></div>
+                    <!-- Cena samochodu -->
+                    <div class="price-tag mb-3">
+                        <!-- Jeśli klient ma rabat -->
+                        <div th:if="${cenaPoRabacie != null and cenaPoRabacie != samochod.cena}">
+                            <del class="text-muted fs-5">
+                                <span th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zŁ'}"></span>
+                            </del>
+                            <br>
+                            <span class="text-success fw-bold fs-3">
+            <span th:text="${#numbers.formatDecimal(cenaPoRabacie, 0, 'COMMA', 2, 'POINT') + ' zŁ'}"></span>
+        </span>
+                            <div class="mt-2">
+            <span class="badge bg-success">
+                <i class="fas fa-percentage"></i>
+                <span th:text="'Twój rabat: ' + ${klientRabat != null ? klientRabat : 0} + '%'"></span>
+                        </span>
+                                <div class="text-success small mt-1">
+                                    <i class="fas fa-coins"></i> Oszczędzasz:
+                                    <strong th:text="${#numbers.formatDecimal(samochod.cena - cenaPoRabacie, 0, 'COMMA', 2, 'POINT') + ' zŁ'}"></strong>
+                                </div>
+                            </div>
+                        </div>
 
+                        <!-- Jeśli nie ma rabatu -->
+                        <div th:unless="${cenaPoRabacie != null and cenaPoRabacie != samochod.cena}">
+                            <span th:text="${#numbers.formatDecimal(samochod.cena, 0, 'COMMA', 2, 'POINT') + ' zŁ'}"></span>
+                        </div>
+                    </div>
                     <!-- Status -->
                     <div class="mb-3">
                             <span th:if="${samochod.status == 'DOSTEPNY'}"

@@ -78,27 +78,24 @@ public class ZakupController {
             User user = userService.findByUsername(username)
                     .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-            System.out.println("DEBUG: Znaleziono użytkownika: " + user.getUsername());
-            System.out.println("DEBUG: Email: " + user.getEmail());
-            System.out.println("DEBUG: Rola: " + user.getRole());
-            System.out.println("DEBUG: Klient ID: " + (user.getKlient() != null ? user.getKlient().getId() : "NULL"));
-
             List<Zakup> zakupy;
+            BigDecimal klientRabat = BigDecimal.ZERO; // DODAJ TĄ LINIJKĘ
 
-            // Jeżeli użytkownik ma powiązanego klienta
+            // Jeśli użytkownik ma powiązanego klienta
             if (user.getKlient() != null) {
                 Long klientId = user.getKlient().getId();
-                System.out.println("DEBUG: Szukam zakupów dla klienta ID: " + klientId);
                 zakupy = zakupService.findByKlientId(klientId);
-                System.out.println("DEBUG: Znaleziono " + zakupy.size() + " zakupów dla klienta");
+
+                // Pobierz aktualny rabat z bazy (z pominięciem cache)
+                klientRabat = klientService.findById(klientId)
+                        .map(Klient::getAktualnyRabat)
+                        .orElse(BigDecimal.ZERO);
             } else {
-                // Jeżeli użytkownik NIE ma klienta, spróbuj znaleźć zakupy po emailu
-                System.out.println("DEBUG: Użytkownik nie ma powiązanego klienta, szukam po emailu: " + user.getEmail());
                 zakupy = findZakupyByUserEmail(user.getEmail());
-                System.out.println("DEBUG: Znaleziono " + zakupy.size() + " zakupów po emailu");
             }
 
             model.addAttribute("zakupy", zakupy);
+            model.addAttribute("klientRabat", klientRabat); // DODAJ TĄ LINIJKĘ
             model.addAttribute("tytul", "Moje Zakupy");
             model.addAttribute("username", username);
             return "zakupy/lista-klient";
@@ -107,7 +104,7 @@ public class ZakupController {
             System.err.println("BŁĄD w mojeZakupy: " + e.getMessage());
             e.printStackTrace();
             model.addAttribute("errorMessage", "Błąd podczas ładowania zakupów: " + e.getMessage());
-            return "error"; // lub przekieruj na stronę błędu
+            return "error";
         }
     }
 

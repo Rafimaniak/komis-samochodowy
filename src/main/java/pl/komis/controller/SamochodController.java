@@ -11,6 +11,7 @@ import pl.komis.model.*;
 import pl.komis.service.*;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -93,11 +94,58 @@ public class SamochodController {
 
     // Pozostałe metody pozostają bez zmian...
     @GetMapping("/szczegoly")
-    public String szczegolySamochodu(@RequestParam("id") Long id, Model model) {
+    public String szczegolySamochodu(@RequestParam("id") Long id, Model model, Authentication authentication) {
         Samochod samochod = samochodService.findById(id)
                 .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
         model.addAttribute("samochod", samochod);
         model.addAttribute("tytul", samochod.getMarka() + " " + samochod.getModel());
+
+        // DODAJ TĘ CZĘŚĆ: Wyświetlanie ceny z rabatem
+        if (authentication != null && authentication.isAuthenticated()) {
+            String username = authentication.getName();
+
+            // Znajdź użytkownika
+            userService.findByUsername(username).ifPresent(user -> {
+                if (user.getKlient() != null) {
+                    Klient klient = user.getKlient();
+                    BigDecimal rabat = klient.getAktualnyRabat();
+
+                    // DODAJ DEBUG LOG
+                    System.out.println("DEBUG: Klient ID: " + klient.getId());
+                    System.out.println("DEBUG: Rabat klienta: " + rabat);
+
+                    // PRZEKAŻ RABAT DO WIDOKU (nazwa zmiennej: klientRabat)
+                    model.addAttribute("klientRabat", rabat);
+
+                    // Oblicz cenę po rabacie
+                    if (rabat != null && rabat.compareTo(BigDecimal.ZERO) > 0) {
+                        BigDecimal cenaBazowa = samochod.getCena();
+                        BigDecimal mnoznikRabatu = BigDecimal.ONE
+                                .subtract(rabat.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+                        BigDecimal cenaPoRabacie = cenaBazowa.multiply(mnoznikRabatu)
+                                .setScale(2, RoundingMode.HALF_UP);
+
+                        // PRZEKAŻ CENĘ PO RABACIE
+                        model.addAttribute("cenaPoRabacie", cenaPoRabacie);
+
+                        System.out.println("DEBUG: Cena bazowa: " + cenaBazowa);
+                        System.out.println("DEBUG: Cena po rabacie: " + cenaPoRabacie);
+                        System.out.println("DEBUG: Mnożnik rabatu: " + mnoznikRabatu);
+                    } else {
+                        System.out.println("DEBUG: Brak rabatu lub rabat = 0");
+                    }
+                } else {
+                    System.out.println("DEBUG: Użytkownik nie ma powiązanego klienta");
+                    // DODAJ DOMYŚLNĄ WARTOŚĆ
+                    model.addAttribute("klientRabat", BigDecimal.ZERO);
+                }
+            });
+        } else {
+            // Dla niezalogowanych
+            model.addAttribute("klientRabat", BigDecimal.ZERO);
+        }
+
         return "samochody/szczegoly";
     }
 
@@ -176,6 +224,7 @@ public class SamochodController {
     }
 
     // Zakup samochodu - dla zalogowanych użytkowników
+    // Zakup samochodu - dla zalogowanych użytkowników
     @PostMapping("/kup")
     @PreAuthorize("isAuthenticated()")
     public String kupSamochod(
@@ -190,6 +239,7 @@ public class SamochodController {
 
         System.out.println("Znaleziono samochód: " + samochod.getMarka() + " " + samochod.getModel());
         System.out.println("Status przed zakupem: " + samochod.getStatus());
+        System.out.println("Cena samochodu: " + samochod.getCena());
 
         // Pobierz aktualnego użytkownika
         String username = authentication.getName();
@@ -211,11 +261,14 @@ public class SamochodController {
 
                 // 1. Znajdź lub utwórz klienta
                 Klient klient = null;
+                BigDecimal rabatProcent = BigDecimal.ZERO; // DODAJ TĘ LINIĘ
 
                 // Sprawdź czy użytkownik ma powiązanego klienta
                 if (user.getKlient() != null) {
                     klient = user.getKlient();
+                    rabatProcent = klient.getAktualnyRabat(); // POBRZ RABAT
                     System.out.println("Użytkownik ma powiązanego klienta: " + klient.getImie() + " " + klient.getNazwisko());
+                    System.out.println("Rabat klienta: " + rabatProcent + "%"); // DODAJ LOG
                 } else {
                     // Spróbuj znaleźć klienta po emailu
                     klient = klientService.findByEmail(user.getEmail())
@@ -231,6 +284,9 @@ public class SamochodController {
                         klient.setTelefon("Nie podano");
                         klient = klientService.save(klient);
                         System.out.println("Utworzono nowego klienta: " + klient.getImie() + " " + klient.getNazwisko());
+                    } else {
+                        rabatProcent = klient.getAktualnyRabat(); // POBRZ RABAT DLA ISTNIEJĄCEGO KLIENTA
+                        System.out.println("Znaleziono istniejącego klienta. Rabat: " + rabatProcent + "%");
                     }
 
                     // POWIĄŻ KLIENTA Z UŻYTKOWNIKIEM
@@ -259,31 +315,65 @@ public class SamochodController {
                     System.out.println("Utworzono nowego pracownika: " + pracownik.getImie() + " " + pracownik.getNazwisko());
                 }
 
-                // 3. Stwórz obiekt Zakup
+                // 3. OBLICZ CENĘ Z RABATEM - KLUCZOWA ZMIANA!
+                BigDecimal cenaBazowa = samochod.getCena();
+                BigDecimal cenaZRabatem = cenaBazowa;
+
+                if (rabatProcent != null && rabatProcent.compareTo(BigDecimal.ZERO) > 0) {
+                    // Oblicz mnożnik rabatu: 1 - (rabat%/100)
+                    BigDecimal mnoznikRabatu = BigDecimal.ONE
+                            .subtract(rabatProcent.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+
+                    // Oblicz cenę z rabatem
+                    cenaZRabatem = cenaBazowa.multiply(mnoznikRabatu)
+                            .setScale(2, RoundingMode.HALF_UP);
+
+                    System.out.println("Zastosowano rabat: " + rabatProcent + "%");
+                    System.out.println("Cena bazowa: " + cenaBazowa);
+                    System.out.println("Cena po rabacie: " + cenaZRabatem);
+                    System.out.println("Zaoszczędzono: " + cenaBazowa.subtract(cenaZRabatem));
+                } else {
+                    System.out.println("Brak rabatu dla klienta");
+                }
+
+                // 4. Stwórz obiekt Zakup z RABATEM
                 Zakup zakup = new Zakup();
                 zakup.setSamochod(samochod);
                 zakup.setKlient(klient);
                 zakup.setPracownik(pracownik);
                 zakup.setDataZakupu(LocalDate.now());
-                zakup.setCenaZakupu(samochod.getCena());
+                zakup.setCenaBazowa(cenaBazowa); // DODAJ CENĘ BAZOWĄ
+                zakup.setCenaZakupu(cenaZRabatem); // CENA PO RABACIE
+                zakup.setZastosowanyRabat(rabatProcent); // DODAJ PROCENT RABATU
 
                 System.out.println("Tworzę zakup z danymi:");
                 System.out.println("- Samochód: " + samochod.getMarka() + " " + samochod.getModel());
                 System.out.println("- Klient: " + klient.getImie() + " " + klient.getNazwisko());
+                System.out.println("- Rabat: " + rabatProcent + "%");
+                System.out.println("- Cena bazowa: " + cenaBazowa);
+                System.out.println("- Cena po rabacie: " + cenaZRabatem);
                 System.out.println("- Pracownik: " + pracownik.getImie() + " " + pracownik.getNazwisko());
-                System.out.println("- Cena: " + samochod.getCena());
                 System.out.println("- Data: " + LocalDate.now());
 
-                // 4. Zapisz zakup w bazie
+                // 5. Zapisz zakup w bazie
                 Zakup zapisanyZakup = zakupService.save(zakup);
                 System.out.println("Zakup zapisany w bazie! ID: " + zapisanyZakup.getId());
+
+                // 6. Przygotuj komunikat z informacją o rabacie
+                String message;
+                if (rabatProcent.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal zaoszczedzone = cenaBazowa.subtract(cenaZRabatem);
+                    message = String.format("Samochód kupiony! Zastosowano rabat %.0f%%. Zaoszczędziłeś: %.2f zł.",
+                            rabatProcent, zaoszczedzone);
+                } else {
+                    message = "Samochód kupiony! Zakup zarejestrowany w systemie.";
+                }
 
                 if (user.getRole().equals("ADMIN")) {
                     redirectAttributes.addFlashAttribute("successMessage",
                             "Samochód sprzedany i zakup zarejestrowany w systemie!");
                 } else {
-                    redirectAttributes.addFlashAttribute("successMessage",
-                            "Samochód kupiony! Zakup zarejestrowany w systemie.");
+                    redirectAttributes.addFlashAttribute("successMessage", message);
                 }
 
             } catch (Exception e) {
