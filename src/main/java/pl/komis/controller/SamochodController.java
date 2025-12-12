@@ -92,7 +92,6 @@ public class SamochodController {
         return "samochody/lista";
     }
 
-    // Pozostałe metody pozostają bez zmian...
     @GetMapping("/szczegoly")
     public String szczegolySamochodu(@RequestParam("id") Long id, Model model, Authentication authentication) {
         Samochod samochod = samochodService.findById(id)
@@ -101,7 +100,7 @@ public class SamochodController {
         model.addAttribute("samochod", samochod);
         model.addAttribute("tytul", samochod.getMarka() + " " + samochod.getModel());
 
-        // DODAJ TĘ CZĘŚĆ: Wyświetlanie ceny z rabatem
+        // DODAJ TĘ CZĘŚĆ: Wyświetlanie ceny z rabatem i saldem
         if (authentication != null && authentication.isAuthenticated()) {
             String username = authentication.getName();
 
@@ -109,41 +108,54 @@ public class SamochodController {
             userService.findByUsername(username).ifPresent(user -> {
                 if (user.getKlient() != null) {
                     Klient klient = user.getKlient();
-                    BigDecimal rabat = klient.getAktualnyRabat();
+                    BigDecimal rabat = klient.getProcentPremii();
+                    BigDecimal saldo = klient.getSaldoPremii() != null ? klient.getSaldoPremii() : BigDecimal.ZERO;
 
-                    // DODAJ DEBUG LOG
-                    System.out.println("DEBUG: Klient ID: " + klient.getId());
-                    System.out.println("DEBUG: Rabat klienta: " + rabat);
-
-                    // PRZEKAŻ RABAT DO WIDOKU (nazwa zmiennej: klientRabat)
+                    // PRZEKAŻ DANE DO WIDOKU
                     model.addAttribute("klientRabat", rabat);
+                    model.addAttribute("klientSaldo", saldo);
+                    model.addAttribute("klient", klient);
+
+                    // Oblicz maksymalną kwotę do wykorzystania
+                    BigDecimal cenaBazowa = samochod.getCena();
+                    BigDecimal maksWykorzystanie = saldo.min(cenaBazowa);
+                    model.addAttribute("maksWykorzystanie", maksWykorzystanie);
+
+                    // Oblicz premię, która zostanie naliczona
+                    if (rabat != null && rabat.compareTo(BigDecimal.ZERO) > 0) {
+                        BigDecimal premiaOdZakupu = cenaBazowa.multiply(rabat)
+                                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                        model.addAttribute("premiaOdZakupu", premiaOdZakupu);
+                    }
 
                     // Oblicz cenę po rabacie
                     if (rabat != null && rabat.compareTo(BigDecimal.ZERO) > 0) {
-                        BigDecimal cenaBazowa = samochod.getCena();
                         BigDecimal mnoznikRabatu = BigDecimal.ONE
                                 .subtract(rabat.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
                         BigDecimal cenaPoRabacie = cenaBazowa.multiply(mnoznikRabatu)
                                 .setScale(2, RoundingMode.HALF_UP);
 
-                        // PRZEKAŻ CENĘ PO RABACIE
                         model.addAttribute("cenaPoRabacie", cenaPoRabacie);
+                    }
 
-                        System.out.println("DEBUG: Cena bazowa: " + cenaBazowa);
-                        System.out.println("DEBUG: Cena po rabacie: " + cenaPoRabacie);
-                        System.out.println("DEBUG: Mnożnik rabatu: " + mnoznikRabatu);
+                    // Sprawdź czy użytkownik jest tym, który zarezerwował
+                    if (samochod.getZarezerwowanyPrzez() != null) {
+                        boolean czyZarezerwowanyPrzezeMnie = klient.getId().equals(samochod.getZarezerwowanyPrzez().getId());
+                        model.addAttribute("czyZarezerwowanyPrzezeMnie", czyZarezerwowanyPrzezeMnie);
                     } else {
-                        System.out.println("DEBUG: Brak rabatu lub rabat = 0");
+                        model.addAttribute("czyZarezerwowanyPrzezeMnie", false);
                     }
                 } else {
-                    System.out.println("DEBUG: Użytkownik nie ma powiązanego klienta");
-                    // DODAJ DOMYŚLNĄ WARTOŚĆ
                     model.addAttribute("klientRabat", BigDecimal.ZERO);
+                    model.addAttribute("klientSaldo", BigDecimal.ZERO);
+                    model.addAttribute("czyZarezerwowanyPrzezeMnie", false);
                 }
             });
         } else {
             // Dla niezalogowanych
             model.addAttribute("klientRabat", BigDecimal.ZERO);
+            model.addAttribute("klientSaldo", BigDecimal.ZERO);
+            model.addAttribute("czyZarezerwowanyPrzezeMnie", false);
         }
 
         return "samochody/szczegoly";
@@ -209,21 +221,73 @@ public class SamochodController {
     }
 
     // Rezerwacja samochodu - dla zalogowanych użytkowników
+    // Poprawiona metoda rezerwacji
     @PostMapping("/zarezerwuj")
     @PreAuthorize("isAuthenticated()")
-    public String zarezerwujSamochod(@RequestParam("id") Long id) {
-        Samochod samochod = samochodService.findById(id)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+    public String zarezerwujSamochod(@RequestParam("id") Long id,
+                                     Authentication authentication,
+                                     RedirectAttributes redirectAttributes) {
+        try {
+            System.out.println("=== ROZPOCZĘCIE REZERWACJI SAMOCHODU ID: " + id + " ===");
 
-        if ("DOSTEPNY".equals(samochod.getStatus())) {
+            Samochod samochod = samochodService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+            System.out.println("Samochód: " + samochod.getMarka() + " " + samochod.getModel());
+            System.out.println("Status przed rezerwacją: " + samochod.getStatus());
+
+            // Pobierz aktualnego użytkownika
+            String username = authentication.getName();
+            User user = userService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            System.out.println("Użytkownik: " + user.getUsername());
+            System.out.println("Czy ma klienta: " + (user.getKlient() != null));
+
+            // Upewnij się, że użytkownik ma klienta
+            Klient klient = user.getKlient();
+            if (klient == null) {
+                System.out.println("Brak klienta - tworzę...");
+                klient = userService.ensureUserHasKlient(user.getId());
+            }
+
+            System.out.println("Klient ID: " + klient.getId());
+            System.out.println("Klient: " + klient.getImie() + " " + klient.getNazwisko());
+
+            // Sprawdź czy samochód jest dostępny
+            if (!"DOSTEPNY".equals(samochod.getStatus())) {
+                String errorMsg = "Samochód nie jest dostępny do rezerwacji. Aktualny status: " + samochod.getStatus();
+                System.out.println("BŁĄD: " + errorMsg);
+                redirectAttributes.addFlashAttribute("errorMessage", errorMsg);
+                return "redirect:/samochody/szczegoly?id=" + id;
+            }
+
+            // Zarezerwuj samochód dla tego klienta
             samochod.setStatus("ZAREZERWOWANY");
-            samochodService.save(samochod);
-        }
+            samochod.setZarezerwowanyPrzez(klient);
+            samochod.setDataRezerwacji(LocalDate.now());
 
-        return "redirect:/samochody/szczegoly?id=" + id;
+            samochodService.save(samochod);
+
+            System.out.println("Rezerwacja udana! Klient ID: " + klient.getId());
+            System.out.println("Samochód zarezerwowany przez: " + samochod.getZarezerwowanyPrzez().getId());
+            System.out.println("Status po rezerwacji: " + samochod.getStatus());
+
+            redirectAttributes.addFlashAttribute("successMessage",
+                    "Samochód został zarezerwowany pomyślnie! Masz 7 dni na dokonanie zakupu.");
+
+            return "redirect:/samochody/szczegoly?id=" + id;
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD podczas rezerwacji: " + e.getMessage());
+            e.printStackTrace();
+
+            redirectAttributes.addFlashAttribute("errorMessage",
+                    "Błąd podczas rezerwacji: " + e.getMessage());
+            return "redirect:/samochody/szczegoly?id=" + id;
+        }
     }
 
-    // Zakup samochodu - dla zalogowanych użytkowników
     // Zakup samochodu - dla zalogowanych użytkowników
     @PostMapping("/kup")
     @PreAuthorize("isAuthenticated()")
@@ -232,179 +296,241 @@ public class SamochodController {
             Authentication authentication,
             RedirectAttributes redirectAttributes) {
 
-        System.out.println("=== ROZPOCZĘCIE ZAKUPU SAMOCHODU ID: " + id + " ===");
+        try {
+            System.out.println("=== ROZPOCZĘCIE ZAKUPU SAMOCHODU ID: " + id + " ===");
 
-        Samochod samochod = samochodService.findById(id)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+            // 1. Pobierz samochód
+            Samochod samochod = samochodService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
 
-        System.out.println("Znaleziono samochód: " + samochod.getMarka() + " " + samochod.getModel());
-        System.out.println("Status przed zakupem: " + samochod.getStatus());
-        System.out.println("Cena samochodu: " + samochod.getCena());
+            System.out.println("Samochód: " + samochod.getMarka() + " " + samochod.getModel());
+            System.out.println("Status: " + samochod.getStatus());
 
-        // Pobierz aktualnego użytkownika
-        String username = authentication.getName();
-        User user = userService.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+            // 2. Pobierz użytkownika
+            String username = authentication.getName();
+            User user = userService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        System.out.println("Użytkownik: " + user.getUsername() + ", rola: " + user.getRole());
+            System.out.println("Użytkownik: " + user.getUsername());
 
-        if ("DOSTEPNY".equals(samochod.getStatus()) || "ZAREZERWOWANY".equals(samochod.getStatus())) {
+            // 3. Upewnij się, że użytkownik ma klienta
+            Klient klient = user.getKlient();
+            if (klient == null) {
+                klient = userService.ensureUserHasKlient(user.getId());
+                if (klient == null) {
+                    throw new RuntimeException("Nie można utworzyć klienta dla użytkownika");
+                }
+            }
+
+            System.out.println("Klient ID: " + klient.getId());
+
+            // 4. SPRAWDŹ CZY MOŻNA KUPIĆ TEN SAMOCHÓD
+            if (!"DOSTEPNY".equals(samochod.getStatus()) && !"ZAREZERWOWANY".equals(samochod.getStatus())) {
+                throw new RuntimeException("Samochód nie jest dostępny do sprzedaży. Status: " + samochod.getStatus());
+            }
+
+            // 5. Jeśli zarezerwowany, sprawdź czy to TEN SAM klient
+            if ("ZAREZERWOWANY".equals(samochod.getStatus())) {
+                if (samochod.getZarezerwowanyPrzez() == null) {
+                    System.out.println("UWAGA: Samochód zarezerwowany, ale brak przypisanego klienta");
+                    // Można kontynuować - być może stara rezerwacja bez przypisania
+                } else if (!samochod.getZarezerwowanyPrzez().getId().equals(klient.getId())) {
+                    throw new RuntimeException("Ten samochód jest zarezerwowany przez innego klienta. " +
+                            "Tylko osoba rezerwująca może go kupić.");
+                }
+            }
+
+            // 6. Zaktualizuj status samochodu
             samochod.setStatus("SPRZEDANY");
+            samochod.setZarezerwowanyPrzez(null); // Wyczyść rezerwację po zakupie
+            samochod.setDataRezerwacji(null);
             samochodService.save(samochod);
 
             System.out.println("Status zmieniony na: SPRZEDANY");
 
-            try {
-                // ============================================
-                // TWORZENIE REKORDU ZAKUPU W BAZIE DANYCH
-                // ============================================
+            // 7. Znajdź pracownika (pierwszego z listy)
+            Pracownik pracownik = pracownikService.findAll().stream()
+                    .findFirst()
+                    .orElseGet(() -> {
+                        // Jeśli brak pracowników, utwórz domyślnego
+                        Pracownik p = new Pracownik();
+                        p.setImie("Pracownik");
+                        p.setNazwisko("Domyślny");
+                        p.setStanowisko("Sprzedawca");
+                        p.setEmail("pracownik@komis.pl");
+                        p.setTelefon("111-222-333");
+                        p.setDataZatrudnienia(LocalDate.now());
+                        return pracownikService.save(p);
+                    });
 
-                // 1. Znajdź lub utwórz klienta
-                Klient klient = null;
-                BigDecimal rabatProcent = BigDecimal.ZERO; // DODAJ TĘ LINIĘ
+            System.out.println("Pracownik: " + pracownik.getImie() + " " + pracownik.getNazwisko());
 
-                // Sprawdź czy użytkownik ma powiązanego klienta
-                if (user.getKlient() != null) {
-                    klient = user.getKlient();
-                    rabatProcent = klient.getAktualnyRabat(); // POBRZ RABAT
-                    System.out.println("Użytkownik ma powiązanego klienta: " + klient.getImie() + " " + klient.getNazwisko());
-                    System.out.println("Rabat klienta: " + rabatProcent + "%"); // DODAJ LOG
-                } else {
-                    // Spróbuj znaleźć klienta po emailu
-                    klient = klientService.findByEmail(user.getEmail())
-                            .orElse(null);
+            // 8. Oblicz cenę z rabatem
+            BigDecimal cenaBazowa = samochod.getCena();
+            BigDecimal rabatProcent = klient.getProcentPremii() != null ?
+                    klient.getProcentPremii() : BigDecimal.ZERO;
 
-                    if (klient == null) {
-                        // Utwórz nowego klienta na podstawie danych użytkownika
-                        System.out.println("Tworzę nowego klienta dla użytkownika: " + user.getUsername());
-                        klient = new Klient();
-                        klient.setImie(extractFirstName(user.getUsername()));
-                        klient.setNazwisko(extractLastName(user.getUsername()));
-                        klient.setEmail(user.getEmail());
-                        klient.setTelefon("Nie podano");
-                        klient = klientService.save(klient);
-                        System.out.println("Utworzono nowego klienta: " + klient.getImie() + " " + klient.getNazwisko());
-                    } else {
-                        rabatProcent = klient.getAktualnyRabat(); // POBRZ RABAT DLA ISTNIEJĄCEGO KLIENTA
-                        System.out.println("Znaleziono istniejącego klienta. Rabat: " + rabatProcent + "%");
-                    }
+            BigDecimal cenaZRabatem = cenaBazowa;
+            if (rabatProcent.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal mnoznikRabatu = BigDecimal.ONE
+                        .subtract(rabatProcent.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+                cenaZRabatem = cenaBazowa.multiply(mnoznikRabatu)
+                        .setScale(2, RoundingMode.HALF_UP);
 
-                    // POWIĄŻ KLIENTA Z UŻYTKOWNIKIEM
-                    user.setKlient(klient);
-                    userService.updateUser(user);
-                    System.out.println("Powiązano klienta z użytkownikiem");
-                }
-
-                // 2. Znajdź pracownika (domyślnie pierwszy z bazy)
-                Pracownik pracownik = null;
-                List<Pracownik> wszyscyPracownicy = pracownikService.findAll();
-                if (!wszyscyPracownicy.isEmpty()) {
-                    pracownik = wszyscyPracownicy.get(0);
-                    System.out.println("Użyto pracownika: " + pracownik.getImie() + " " + pracownik.getNazwisko());
-                } else {
-                    // Utwórz domyślnego pracownika
-                    System.out.println("Brak pracowników w bazie - tworzę domyślnego...");
-                    Pracownik nowyPracownik = new Pracownik();
-                    nowyPracownik.setImie("Pracownik");
-                    nowyPracownik.setNazwisko("Domyślny");
-                    nowyPracownik.setStanowisko("Sprzedawca");
-                    nowyPracownik.setEmail("pracownik@komis.pl");
-                    nowyPracownik.setTelefon("111-222-333");
-                    nowyPracownik.setDataZatrudnienia(LocalDate.now());
-                    pracownik = pracownikService.save(nowyPracownik);
-                    System.out.println("Utworzono nowego pracownika: " + pracownik.getImie() + " " + pracownik.getNazwisko());
-                }
-
-                // 3. OBLICZ CENĘ Z RABATEM - KLUCZOWA ZMIANA!
-                BigDecimal cenaBazowa = samochod.getCena();
-                BigDecimal cenaZRabatem = cenaBazowa;
-
-                if (rabatProcent != null && rabatProcent.compareTo(BigDecimal.ZERO) > 0) {
-                    // Oblicz mnożnik rabatu: 1 - (rabat%/100)
-                    BigDecimal mnoznikRabatu = BigDecimal.ONE
-                            .subtract(rabatProcent.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
-
-                    // Oblicz cenę z rabatem
-                    cenaZRabatem = cenaBazowa.multiply(mnoznikRabatu)
-                            .setScale(2, RoundingMode.HALF_UP);
-
-                    System.out.println("Zastosowano rabat: " + rabatProcent + "%");
-                    System.out.println("Cena bazowa: " + cenaBazowa);
-                    System.out.println("Cena po rabacie: " + cenaZRabatem);
-                    System.out.println("Zaoszczędzono: " + cenaBazowa.subtract(cenaZRabatem));
-                } else {
-                    System.out.println("Brak rabatu dla klienta");
-                }
-
-                // 4. Stwórz obiekt Zakup z RABATEM
-                Zakup zakup = new Zakup();
-                zakup.setSamochod(samochod);
-                zakup.setKlient(klient);
-                zakup.setPracownik(pracownik);
-                zakup.setDataZakupu(LocalDate.now());
-                zakup.setCenaBazowa(cenaBazowa); // DODAJ CENĘ BAZOWĄ
-                zakup.setCenaZakupu(cenaZRabatem); // CENA PO RABACIE
-                zakup.setZastosowanyRabat(rabatProcent); // DODAJ PROCENT RABATU
-
-                System.out.println("Tworzę zakup z danymi:");
-                System.out.println("- Samochód: " + samochod.getMarka() + " " + samochod.getModel());
-                System.out.println("- Klient: " + klient.getImie() + " " + klient.getNazwisko());
-                System.out.println("- Rabat: " + rabatProcent + "%");
-                System.out.println("- Cena bazowa: " + cenaBazowa);
-                System.out.println("- Cena po rabacie: " + cenaZRabatem);
-                System.out.println("- Pracownik: " + pracownik.getImie() + " " + pracownik.getNazwisko());
-                System.out.println("- Data: " + LocalDate.now());
-
-                // 5. Zapisz zakup w bazie
-                Zakup zapisanyZakup = zakupService.save(zakup);
-                System.out.println("Zakup zapisany w bazie! ID: " + zapisanyZakup.getId());
-
-                // 6. Przygotuj komunikat z informacją o rabacie
-                String message;
-                if (rabatProcent.compareTo(BigDecimal.ZERO) > 0) {
-                    BigDecimal zaoszczedzone = cenaBazowa.subtract(cenaZRabatem);
-                    message = String.format("Samochód kupiony! Zastosowano rabat %.0f%%. Zaoszczędziłeś: %.2f zł.",
-                            rabatProcent, zaoszczedzone);
-                } else {
-                    message = "Samochód kupiony! Zakup zarejestrowany w systemie.";
-                }
-
-                if (user.getRole().equals("ADMIN")) {
-                    redirectAttributes.addFlashAttribute("successMessage",
-                            "Samochód sprzedany i zakup zarejestrowany w systemie!");
-                } else {
-                    redirectAttributes.addFlashAttribute("successMessage", message);
-                }
-
-            } catch (Exception e) {
-                System.err.println("BŁĄD podczas tworzenia zakupu: " + e.getMessage());
-                e.printStackTrace();
-                redirectAttributes.addFlashAttribute("errorMessage",
-                        "Samochód oznaczony jako sprzedany, ale wystąpił błąd przy rejestracji zakupu: " + e.getMessage());
+                System.out.println("Zastosowano rabat: " + rabatProcent + "%");
+                System.out.println("Cena po rabacie: " + cenaZRabatem);
             }
-        } else {
-            System.out.println("Samochód nie jest dostępny do sprzedaży. Aktualny status: " + samochod.getStatus());
+
+            // 9. Oblicz premię, która zostanie dodana do salda
+            BigDecimal naliczonaPremia = BigDecimal.ZERO;
+            if (rabatProcent.compareTo(BigDecimal.ZERO) > 0) {
+                naliczonaPremia = cenaBazowa.multiply(rabatProcent)
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                System.out.println("Naliczona premia: " + naliczonaPremia + " zł");
+            }
+
+            // 10. Utwórz zakup
+            Zakup zakup = Zakup.builder()
+                    .samochod(samochod)
+                    .klient(klient)
+                    .pracownik(pracownik)
+                    .dataZakupu(LocalDate.now())
+                    .cenaBazowa(cenaBazowa)
+                    .cenaZakupu(cenaZRabatem)
+                    .zastosowanyRabat(rabatProcent)
+                    .naliczonaPremia(naliczonaPremia)
+                    .wykorzystaneSaldo(BigDecimal.ZERO) // Normalny zakup bez wykorzystania salda
+                    .build();
+
+            Zakup zapisanyZakup = zakupService.save(zakup);
+            System.out.println("Zakup zapisany! ID: " + zapisanyZakup.getId());
+
+            // 11. Aktualizuj dane klienta (liczba zakupów, wydane kwoty)
+            klient.setLiczbaZakupow(klient.getLiczbaZakupow() + 1);
+            klient.setTotalWydane(klient.getTotalWydane().add(cenaZRabatem));
+
+            // Aktualizuj procent premii na podstawie liczby zakupów
+            if (klient.getLiczbaZakupow() >= 5) {
+                klient.setProcentPremii(new BigDecimal("15"));
+            } else if (klient.getLiczbaZakupow() >= 3) {
+                klient.setProcentPremii(new BigDecimal("10"));
+            } else if (klient.getLiczbaZakupow() >= 2) {
+                klient.setProcentPremii(new BigDecimal("5"));
+            } else {
+                klient.setProcentPremii(BigDecimal.ZERO);
+            }
+
+            // Dodaj premię do salda klienta
+            klient.setSaldoPremii(klient.getSaldoPremii().add(naliczonaPremia));
+
+            klientService.save(klient);
+            System.out.println("Zaktualizowano dane klienta");
+            System.out.println("Nowa liczba zakupów: " + klient.getLiczbaZakupow());
+            System.out.println("Nowe saldo: " + klient.getSaldoPremii() + " zł");
+            System.out.println("Nowy procent premii: " + klient.getProcentPremii() + "%");
+
+            // 12. Przygotuj komunikat
+            String message;
+            if (rabatProcent.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal zaoszczedzone = cenaBazowa.subtract(cenaZRabatem);
+                message = String.format(
+                        "Samochód kupiony!<br>" +
+                                "Zastosowano rabat: <strong>%.0f%%</strong><br>" +
+                                "Zaoszczędziłeś: <strong>%.2f zł</strong><br>" +
+                                "Na Twoje saldo dodano: <strong>%.2f zł</strong> premii",
+                        rabatProcent, zaoszczedzone, naliczonaPremia
+                );
+            } else {
+                message = "Samochód kupiony pomyślnie! Zakup zarejestrowany w systemie.";
+            }
+
+            redirectAttributes.addFlashAttribute("successMessage", message);
+            System.out.println("=== ZAKUP ZAKOŃCZONY SUKCESEM ===");
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD podczas zakupu: " + e.getMessage());
+            e.printStackTrace();
             redirectAttributes.addFlashAttribute("errorMessage",
-                    "Nie można kupić samochodu. Aktualny status: " + samochod.getStatus());
+                    "Błąd podczas zakupu: " + e.getMessage());
         }
 
-        System.out.println("=== ZAKOŃCZENIE ZAKUPU ===");
         return "redirect:/samochody/szczegoly?id=" + id;
     }
 
-    // Anulowanie rezerwacji - dla zalogowanych użytkowników
+    // Poprawiona metoda anulowania rezerwacji
     @PostMapping("/anuluj-rezerwacje")
     @PreAuthorize("isAuthenticated()")
-    public String anulujRezerwacje(@RequestParam("id") Long id) {
-        Samochod samochod = samochodService.findById(id)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+    public String anulujRezerwacje(@RequestParam("id") Long id,
+                                   Authentication authentication,
+                                   RedirectAttributes redirectAttributes) {
+        try {
+            System.out.println("=== ANULOWANIE REZERWACJI SAMOCHODU ID: " + id + " ===");
 
-        if ("ZAREZERWOWANY".equals(samochod.getStatus())) {
+            Samochod samochod = samochodService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+            System.out.println("Samochód: " + samochod.getMarka() + " " + samochod.getModel());
+            System.out.println("Status: " + samochod.getStatus());
+            System.out.println("Zarezerwowany przez: " +
+                    (samochod.getZarezerwowanyPrzez() != null ?
+                            samochod.getZarezerwowanyPrzez().getId() : "null"));
+
+            // Pobierz aktualnego użytkownika
+            String username = authentication.getName();
+            User user = userService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            Klient klient = user.getKlient();
+            if (klient == null) {
+                throw new RuntimeException("Nie masz powiązanego klienta");
+            }
+
+            System.out.println("Klient ID: " + klient.getId());
+
+            // Sprawdź czy samochód jest zarezerwowany i czy to ten klient go zarezerwował
+            if (!"ZAREZERWOWANY".equals(samochod.getStatus())) {
+                String errorMsg = "Samochód nie jest zarezerwowany. Aktualny status: " + samochod.getStatus();
+                System.out.println("BŁĄD: " + errorMsg);
+                redirectAttributes.addFlashAttribute("errorMessage", errorMsg);
+                return "redirect:/samochody/szczegoly?id=" + id;
+            }
+
+            if (samochod.getZarezerwowanyPrzez() == null ||
+                    !samochod.getZarezerwowanyPrzez().getId().equals(klient.getId())) {
+                String errorMsg = "Ten samochód został zarezerwowany przez innego klienta. " +
+                        "Tylko osoba rezerwująca może anulować rezerwację.";
+                System.out.println("BŁĄD: " + errorMsg);
+                System.out.println("Zarezerwowany przez: " +
+                        (samochod.getZarezerwowanyPrzez() != null ?
+                                samochod.getZarezerwowanyPrzez().getId() : "null"));
+                System.out.println("Aktualny klient: " + klient.getId());
+
+                redirectAttributes.addFlashAttribute("errorMessage", errorMsg);
+                return "redirect:/samochody/szczegoly?id=" + id;
+            }
+
+            // Anuluj rezerwację
             samochod.setStatus("DOSTEPNY");
-            samochodService.save(samochod);
-        }
+            samochod.setZarezerwowanyPrzez(null);
+            samochod.setDataRezerwacji(null);
 
-        return "redirect:/samochody/szczegoly?id=" + id;
+            samochodService.save(samochod);
+
+            System.out.println("Rezerwacja anulowana pomyślnie!");
+
+            redirectAttributes.addFlashAttribute("successMessage",
+                    "Rezerwacja została anulowana. Samochód jest znów dostępny.");
+
+            return "redirect:/samochody/szczegoly?id=" + id;
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD podczas anulowania rezerwacji: " + e.getMessage());
+            e.printStackTrace();
+
+            redirectAttributes.addFlashAttribute("errorMessage",
+                    "Błąd podczas anulowania rezerwacji: " + e.getMessage());
+            return "redirect:/samochody/szczegoly?id=" + id;
+        }
     }
 
     // Pomocnicze metody do ekstrakcji imienia i nazwiska z username
@@ -425,5 +551,27 @@ public class SamochodController {
     private String capitalize(String str) {
         if (str == null || str.isEmpty()) return str;
         return str.substring(0, 1).toUpperCase() + str.substring(1).toLowerCase();
+    }
+
+    /**
+     * Oblicza premię, która zostanie naliczona na saldo klienta
+     */
+    private BigDecimal obliczPremie(BigDecimal cena, BigDecimal procentPremii) {
+        if (procentPremii == null || procentPremii.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return cena.multiply(procentPremii)
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Oblicza maksymalną kwotę, jaką klient może wykorzystać z salda
+     */
+    private BigDecimal obliczMaksWykorzystanie(BigDecimal saldoKlienta, BigDecimal cenaSamochodu) {
+        if (saldoKlienta == null || saldoKlienta.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        // Można wykorzystać maksymalnie tyle, ile wynosi saldo lub cena samochodu
+        return saldoKlienta.min(cenaSamochodu);
     }
 }

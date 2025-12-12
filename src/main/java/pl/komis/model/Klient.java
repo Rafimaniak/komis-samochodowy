@@ -1,9 +1,9 @@
 package pl.komis.model;
 
 import jakarta.persistence.*;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.Setter;
 import org.hibernate.annotations.DynamicUpdate;
 
 import java.math.BigDecimal;
@@ -12,8 +12,8 @@ import java.util.List;
 @Entity
 @Table(name = "klient")
 @DynamicUpdate
-@Getter
-@Setter  // ZAMIENIAMY RĘCZNE GETTERY/SETTERY NA LOMBOK
+@Data
+@NoArgsConstructor
 @AllArgsConstructor
 public class Klient {
 
@@ -29,77 +29,27 @@ public class Klient {
     @OneToMany(mappedBy = "klient", cascade = CascadeType.ALL)
     private List<Zakup> zakupy;
 
-    // NOWE POLA DO OBSŁUGI SYSTEMU RABATOWEGO
     @Column(name = "liczba_zakupow")
     private Integer liczbaZakupow = 0;
 
-    @Column(name = "aktualny_rabat", precision = 5, scale = 2)
-    private BigDecimal aktualnyRabat = BigDecimal.ZERO;
+    @Column(name = "procent_premii", precision = 5, scale = 2)
+    private BigDecimal procentPremii = BigDecimal.ZERO;
 
-    public Klient() {}
+    @Column(name = "saldo_premii", precision = 12, scale = 2)
+    private BigDecimal saldoPremii = BigDecimal.ZERO;
 
-    // --- GETTERY I SETTERY ---
-    public Long getId() {
-        return id;
+    @Column(name = "total_wydane", precision = 12, scale = 2)
+    private BigDecimal totalWydane = BigDecimal.ZERO;
+
+    // Metoda pomocnicza - czy klient może wykorzystać saldo?
+    public boolean mozeWykorzystacSaldo(BigDecimal kwota) {
+        return saldoPremii != null && saldoPremii.compareTo(kwota) >= 0;
     }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getImie() {
-        return imie;
-    }
-
-    public void setImie(String imie) {
-        this.imie = imie;
-    }
-
-    public String getNazwisko() {
-        return nazwisko;
-    }
-
-    public void setNazwisko(String nazwisko) {
-        this.nazwisko = nazwisko;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public String getTelefon() {
-        return telefon;
-    }
-
-    public void setTelefon(String telefon) {
-        this.telefon = telefon;
-    }
-
-    public List<Zakup> getZakupy() {
-        return zakupy;
-    }
-
-    public void setZakupy(List<Zakup> zakupy) {
-        this.zakupy = zakupy;
-    }
-
-    public Integer getLiczbaZakupow() {
-        return liczbaZakupow;
-    }
-
-    public void setLiczbaZakupow(Integer liczbaZakupow) {
-        this.liczbaZakupow = liczbaZakupow;
-    }
-
-    public BigDecimal getAktualnyRabat() {
-        return aktualnyRabat;
-    }
-
-    public void setAktualnyRabat(BigDecimal aktualnyRabat) {
-        this.aktualnyRabat = aktualnyRabat;
+    // Metoda pomocnicza - użyj salda
+    public void uzyjSalda(BigDecimal kwota) {
+        if (mozeWykorzystacSaldo(kwota)) {
+            saldoPremii = saldoPremii.subtract(kwota);
+        }
     }
 }

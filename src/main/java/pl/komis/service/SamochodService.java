@@ -52,7 +52,6 @@ public class SamochodService {
             samochod.setStatus("DOSTEPNY");
         }
 
-        // Upewnij się, że zdjecieUrl nie jest null
         String zdjecieUrl = samochod.getZdjecieUrl();
         if (zdjecieUrl == null) {
             zdjecieUrl = "";
@@ -77,24 +76,9 @@ public class SamochodService {
             return samochodRepository.findById(newCarId)
                     .orElseThrow(() -> new RuntimeException("Błąd podczas tworzenia samochodu"));
         } else {
-            // Aktualizacja istniejącego samochodu przez procedurę
-            samochodRepository.updateCar(
-                    samochod.getId(),
-                    samochod.getMarka(),
-                    samochod.getModel(),
-                    samochod.getRokProdukcji(),
-                    samochod.getPrzebieg(),
-                    samochod.getPojemnoscSilnika(),
-                    samochod.getRodzajPaliwa(),
-                    samochod.getSkrzyniaBiegow(),
-                    samochod.getKolor(),
-                    samochod.getCena(),
-                    samochod.getStatus(),
-                    zdjecieUrl
-            );
-
-            return samochodRepository.findById(samochod.getId())
-                    .orElseThrow(() -> new RuntimeException("Błąd podczas aktualizacji samochodu"));
+            // ZAPISZ WSZYSTKIE POLA SAMOCHODU
+            // Użyj standardowego save() zamiast procedury, aby zapisać wszystkie pola
+            return samochodRepository.save(samochod);
         }
     }
 

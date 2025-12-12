@@ -1,6 +1,9 @@
 spring:
+  main:
+    allow-circular-references: true
+    allow-bean-definition-overriding: true
   datasource:
-    url: jdbc:postgresql://localhost:5432/komis
+    url: jdbc:postgresql://localhost:5433/komis
     username: postgres
     password: student
     driver-class-name: org.postgresql.Driver

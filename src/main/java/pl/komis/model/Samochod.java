@@ -33,9 +33,16 @@ public class Samochod {
     @Column(name = "data_dodania")
     private LocalDate dataDodania;
 
-    // DODANE: Pole na zdjęcie
     @Column(name = "zdjecie_url")
     private String zdjecieUrl;
+
+    // DODAJ TE POLA:
+    @ManyToOne
+    @JoinColumn(name = "zarezerwowany_przez_id")
+    private Klient zarezerwowanyPrzez;
+
+    @Column(name = "data_rezerwacji")
+    private LocalDate dataRezerwacji;
 
     public Samochod() {}
 
@@ -142,5 +149,22 @@ public class Samochod {
 
     public void setZdjecieUrl(String zdjecieUrl) {
         this.zdjecieUrl = zdjecieUrl;
+    }
+
+    // DODAJ TE GETTERY I SETTERY:
+    public Klient getZarezerwowanyPrzez() {
+        return zarezerwowanyPrzez;
+    }
+
+    public void setZarezerwowanyPrzez(Klient zarezerwowanyPrzez) {
+        this.zarezerwowanyPrzez = zarezerwowanyPrzez;
+    }
+
+    public LocalDate getDataRezerwacji() {
+        return dataRezerwacji;
+    }
+
+    public void setDataRezerwacji(LocalDate dataRezerwacji) {
+        this.dataRezerwacji = dataRezerwacji;
     }
 }

@@ -10,20 +10,32 @@ import java.util.Optional;
 
 public interface KlientRepository extends JpaRepository<Klient, Long> {
 
-    // Znajdź klienta po emailu
     Optional<Klient> findByEmail(String email);
 
-    // Pobierz aktualny rabat klienta (używając native query do bezpośredniego odczytu z bazy)
-    @Query(value = "SELECT k.aktualny_rabat FROM klienci k WHERE k.id = :klientId", nativeQuery = true)
-    Optional<BigDecimal> findAktualnyRabatById(@Param("klientId") Long klientId);
+    // ZMIANA: aktualny_rabat → procent_premii
+    @Query(value = "SELECT k.procent_premii FROM klient k WHERE k.id = :klientId", nativeQuery = true)
+    Optional<BigDecimal> findProcentPremiiById(@Param("klientId") Long klientId);
 
-    // Pobierz liczbę zakupów klienta
-    @Query(value = "SELECT k.liczba_zakupow FROM klienci k WHERE k.id = :klientId", nativeQuery = true)
+    // Nowa metoda: pobierz saldo premii
+    @Query(value = "SELECT k.saldo_premii FROM klient k WHERE k.id = :klientId", nativeQuery = true)
+    Optional<BigDecimal> findSaldoPremiiById(@Param("klientId") Long klientId);
+
+    @Query(value = "SELECT k.liczba_zakupow FROM klient k WHERE k.id = :klientId", nativeQuery = true)
     Optional<Integer> findLiczbaZakupowById(@Param("klientId") Long klientId);
 
-    // Wywołaj funkcję PostgreSQL do pobrania rabatu (alternatywna metoda)
-    @Query(value = "SELECT pobierz_rabat_dla_klienta(:klientId)", nativeQuery = true)
-    BigDecimal getRabatDlaKlientaNative(@Param("klientId") Long klientId);
+    // Usuń starą metodę - funkcja oblicz_rabat już nie istnieje
+    // @Query(value = "SELECT pobierz_rabat_dla_klienta(:klientId)", nativeQuery = true)
+    // BigDecimal getRabatDlaKlientaNative(@Param("klientId") Long klientId);
+
     @Query("SELECT k FROM Klient k WHERE k.id = :id")
     Optional<Klient> findByIdWithZakupy(@Param("id") Long id);
+
+    // Nowa metoda: wywołaj funkcję PostgreSQL do obliczenia procentu premii
+    @Query(value = "SELECT oblicz_procent_premii(:liczbaZakupow)", nativeQuery = true)
+    BigDecimal obliczProcentPremiiNative(@Param("liczbaZakupow") Long liczbaZakupow);
+    @Query("SELECT COALESCE(SUM(z.naliczonaPremia), 0) FROM Zakup z WHERE z.klient.id = :klientId")
+    BigDecimal sumNaliczonaPremiaByKlientId(@Param("klientId") Long klientId);
+
+    @Query("SELECT COALESCE(SUM(z.wykorzystaneSaldo), 0) FROM Zakup z WHERE z.klient.id = :klientId")
+    BigDecimal sumWykorzystaneSaldoByKlientId(@Param("klientId") Long klientId);
 }

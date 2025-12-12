@@ -1,11 +1,29 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zarządzanie użytkownikami</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
+        body {
+            padding-top: 70px;
+            background-color: #f8f9fa;
+        }
+
+        .navbar-custom {
+            background-color: #343a40 !important;
+        }
+
+        .table-responsive {
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
         .actions-column {
             width: 250px;
         }
@@ -15,41 +33,74 @@
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container">
-        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
 
+<!-- Fixed Navigation -->
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top navbar-custom">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">
+            <i class="fas fa-car"></i> Komis Samochodowy
+        </a>
+
+        <!-- Przycisk hamburger menu dla mobilnych -->
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
 
+        <!-- Menu główne -->
         <div class="collapse navbar-collapse" id="navbarNav">
-            <div class="navbar-nav">
-                <a class="nav-link" href="/samochody">Samochody</a>
-                <div class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                        Admin
-                    </a>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="/admin">Panel Admina</a></li>
-                        <li><a class="dropdown-item" href="/admin/users">Użytkownicy</a></li>
-                        <li><a class="dropdown-item" href="/klienci">Klienci</a></li>
-                        <li><a class="dropdown-item" href="/pracownicy">Pracownicy</a></li>
-                    </ul>
-                </div>
-            </div>
+            <!-- Menu dla admina -->
+            <ul class="navbar-nav" sec:authorize="hasRole('ADMIN')">
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/admin}"><i class="fas fa-tachometer-alt"></i> Panel Admina</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link active" th:href="@{/admin/users}"><i class="fas fa-user-friends"></i> Użytkownicy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/klienci}"><i class="fas fa-users"></i> Klienci</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/pracownicy}"><i class="fas fa-id-badge"></i> Pracownicy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/serwis}"><i class="fas fa-tools"></i> Serwis</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/zakupy}"><i class="fas fa-shopping-cart"></i> Wszystkie zakupy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/zakupy/rabaty}"><i class="fas fa-gift"></i> Premie</a>
+                </li>
+            </ul>
 
-            <div class="navbar-nav ms-auto">
-                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
-                <a class="nav-link" href="/admin">Panel Admina</a>
-                <a class="nav-link" href="/">Strona Główna</a>
-                <a class="nav-link" href="#" th:href="@{/logout}">Wyloguj</a>
-            </div>
+            <!-- Menu ogólne (dostępne dla wszystkich) -->
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="/samochody"><i class="fas fa-car"></i> Samochody</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/search"><i class="fas fa-search"></i> Wyszukiwanie</a>
+                </li>
+            </ul>
+
+            <!-- Informacje o użytkowniku i wylogowanie -->
+            <ul class="navbar-nav ms-auto" sec:authorize="isAuthenticated()">
+                <li class="nav-item">
+                    <span class="navbar-text me-3">
+                        <i class="fas fa-user"></i> <span sec:authentication="name"></span>
+                    </span>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/logout}">
+                        <i class="fas fa-sign-out-alt"></i> Wyloguj
+                    </a>
+                </li>
+            </ul>
         </div>
     </div>
 </nav>
 
-<div class="container mt-4">
+<div class="container mt-3">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1><i class="fas fa-users-cog"></i> Zarządzanie użytkownikami</h1>
         <a href="/admin/users/create" class="btn btn-success">
@@ -154,11 +205,8 @@
     </div>
 
     <div class="mt-3">
-        <a href="/admin" class="btn btn-secondary">
+        <a th:href="@{/admin}" class="btn btn-secondary">
             <i class="fas fa-arrow-left"></i> Powrót do panelu admina
-        </a>
-        <a href="/" class="btn btn-outline-secondary ms-2">
-            <i class="fas fa-home"></i> Strona główna
         </a>
     </div>
 </div>

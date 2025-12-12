@@ -1,47 +1,54 @@
 package pl.komis.config;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
-import pl.komis.service.CustomUserDetailsService;
+import pl.komis.model.User;
+import pl.komis.repository.UserRepository;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity(prePostEnabled = true)
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final CustomUserDetailsService customUserDetailsService;
+    private final UserRepository userRepository;
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, @Lazy pl.komis.service.UserService userService) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
-                        // Strony publiczne - dostępne bez logowania
                         .requestMatchers("/", "/css/**", "/js/**", "/images/**", "/api/**",
                                 "/samochody", "/samochody/szczegoly", "/register",
-                                "/search", "/search/**", "/search/quick", "/search/quick/**").permitAll()
-
-                        // Strony admina - wymagają roli ADMIN
+                                "/search", "/search/**", "/login", "/debug/**").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/klienci", "/pracownicy", "/serwis", "/serwis/**").hasRole("ADMIN")  // DODAJ SERWIS
+                        .requestMatchers("/klienci", "/pracownicy", "/serwis", "/serwis/**").hasRole("ADMIN")
                         .requestMatchers("/samochody/nowy", "/samochody/edytuj/**",
                                 "/samochody/zapisz", "/samochody/usun/**").hasRole("ADMIN")
-
-                        .requestMatchers("/zakupy").hasRole("ADMIN") // Pełna lista tylko dla admina
-                        .requestMatchers("/zakupy/moje").authenticated() // Każdy zalogowany widzi swoje
-
-                        // Wszystkie inne strony wymagają logowania
+                        .requestMatchers("/zakupy").hasRole("ADMIN")
+                        .requestMatchers("/zakupy/moje").authenticated()
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
                         .loginPage("/login")
+                        .loginProcessingUrl("/login")
                         .defaultSuccessUrl("/samochody", true)
+                        .failureUrl("/login?error=true")
                         .permitAll()
                 )
                 .logout(logout -> logout
@@ -51,13 +58,71 @@ public class SecurityConfig {
                         .deleteCookies("JSESSIONID")
                         .permitAll()
                 )
-                .userDetailsService(customUserDetailsService);
+                .userDetailsService(userService)
+                .csrf(AbstractHttpConfigurer::disable);
 
         return http.build();
     }
 
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+    public CommandLineRunner createDefaultUsers() {
+        return args -> {
+            PasswordEncoder encoder = passwordEncoder();
+
+            // TYLKO jeśli nie ma żadnych użytkowników w bazie
+            if (userRepository.count() == 0) {
+                System.out.println("=== TWORZENIE DOMYŚLNYCH UŻYTKOWNIKÓW ===");
+
+                // Utwórz admina - BEZPOŚREDNIO przez repozytorium
+                User admin = User.builder()
+                        .username("admin")
+                        .email("admin@komis.pl")
+                        .password(encoder.encode("admin"))
+                        .role("ADMIN")
+                        .enabled(true)
+                        .build();
+                userRepository.save(admin);
+                System.out.println("✅ Utworzono admina: admin / admin");
+
+                // Utwórz user
+                User user = User.builder()
+                        .username("user")
+                        .email("user@komis.pl")
+                        .password(encoder.encode("user"))
+                        .role("USER")
+                        .enabled(true)
+                        .build();
+                userRepository.save(user);
+                System.out.println("✅ Utworzono usera: user / user");
+
+                // Utwórz user2
+                User user2 = User.builder()
+                        .username("user2")
+                        .email("user2@komis.pl")
+                        .password(encoder.encode("user123"))
+                        .role("USER")
+                        .enabled(true)
+                        .build();
+                userRepository.save(user2);
+                System.out.println("✅ Utworzono user2: user2 / user123");
+
+                System.out.println("=== UTWORZONO " + userRepository.count() + " UŻYTKOWNIKÓW ===");
+            } else {
+                System.out.println("⚠️  Użytkownicy już istnieją w bazie (" + userRepository.count() + ")");
+
+                // Sprawdź czy user2 istnieje, jeśli nie to go utwórz
+                if (userRepository.findByUsername("user2").isEmpty()) {
+                    User user2 = User.builder()
+                            .username("user2")
+                            .email("user2@komis.pl")
+                            .password(encoder.encode("user123"))
+                            .role("USER")
+                            .enabled(true)
+                            .build();
+                    userRepository.save(user2);
+                    System.out.println("✅ Utworzono brakującego użytkownika: user2 / user123");
+                }
+            }
+        };
     }
 }

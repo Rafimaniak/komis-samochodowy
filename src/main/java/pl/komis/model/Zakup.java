@@ -13,7 +13,7 @@ import java.math.BigDecimal;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+@Builder(toBuilder = true)  // DODAJ toBuilder = true
 public class Zakup {
 
     @Id
@@ -35,15 +35,23 @@ public class Zakup {
     private LocalDate dataZakupu;
 
     @Column(precision = 12, scale = 2)
-    private BigDecimal cenaZakupu;
+    private BigDecimal cenaZakupu; // Cena ostateczna (po ewentualnym wykorzystaniu salda)
 
-    // NOWE POLE: cena przed zastosowaniem rabatu
     @Column(name = "cena_bazowa", precision = 12, scale = 2)
-    private BigDecimal cenaBazowa;
+    private BigDecimal cenaBazowa; // Cena przed zastosowaniem salda
 
-    // NOWE POLE: procent rabatu zastosowanego w tym zakupie
     @Column(name = "zastosowany_rabat", precision = 5, scale = 2)
-    private BigDecimal zastosowanyRabat = BigDecimal.ZERO;
+    private BigDecimal zastosowanyRabat = BigDecimal.ZERO; // Procent premii naliczonej
+
+    @Column(name = "naliczona_premia", precision = 12, scale = 2)
+    private BigDecimal naliczonaPremia = BigDecimal.ZERO; // Kwota premii z tego zakupu
+
+    @Column(name = "wykorzystane_saldo", precision = 12, scale = 2)
+    private BigDecimal wykorzystaneSaldo = BigDecimal.ZERO; // Kwota wykorzystanego salda
+
+    // Alternatywnie: użyj @Builder.Default dla pól z domyślnymi wartościami
+    // @Builder.Default
+    // private BigDecimal naliczonaPremia = BigDecimal.ZERO;
 
     // Metoda pomocnicza do obliczania zaoszczędzonej kwoty
     public BigDecimal getZaoszczedzonaKwota() {
@@ -51,5 +59,10 @@ public class Zakup {
             return cenaBazowa.subtract(cenaZakupu);
         }
         return BigDecimal.ZERO;
+    }
+
+    // Metoda pomocnicza - czy wykorzystano saldo?
+    public boolean czyWykorzystanoSaldo() {
+        return wykorzystaneSaldo != null && wykorzystaneSaldo.compareTo(BigDecimal.ZERO) > 0;
     }
 }

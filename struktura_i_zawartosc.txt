@@ -1,9 +1,9 @@
 Eksport wybranych plik�w
-Wygenerowano: 12/08/2025 08:39:51
+Wygenerowano: 12/12/2025 03:20:49
 
 
 
-�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy\src\main\java\pl\komis\controller\SamochodController.java
+�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\controller\ZakupController.java
 ----------------------------------------------------------------------------------------------------------------------
 package pl.komis.controller;
 
@@ -16,331 +16,832 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import pl.komis.model.*;
 import pl.komis.service.*;
+import pl.komis.service.KlientService;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Controller
-@RequestMapping("/samochody")
+@RequestMapping("/zakupy")
 @RequiredArgsConstructor
-public class SamochodController {
+public class ZakupController {
 
-    private final SamochodService samochodService;
+    private final ZakupService zakupService;
     private final UserService userService;
     private final KlientService klientService;
-    private final PracownikService pracownikService;
-    private final ZakupService zakupService;
+    private final SamochodService samochodService; // Dodaj to!
+    private final PracownikService pracownikService; // Dodaj to!
 
-    // Widok listy samochodów z wyszukiwarką
+
+    @GetMapping("/rabaty")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String listaRabatow(Model model) {
+        List<Klient> klienci = klientService.findAll();
+
+        // Oblicz statystyki
+        BigDecimal totalSaldo = klienci.stream()
+                .map(k -> k.getSaldoPremii() != null ? k.getSaldoPremii() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalWydane = klienci.stream()
+                .map(k -> k.getTotalWydane() != null ? k.getTotalWydane() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        long klienciZPremia = klienci.stream()
+                .filter(k -> k.getProcentPremii() != null && k.getProcentPremii().compareTo(BigDecimal.ZERO) > 0)
+                .count();
+
+        model.addAttribute("klienci", klienci);
+        model.addAttribute("totalSaldo", totalSaldo);
+        model.addAttribute("totalWydane", totalWydane);
+        model.addAttribute("klienciZPremia", klienciZPremia);
+        model.addAttribute("tytul", "System premii i rabatów");
+        return "zakupy/rabaty";
+    }
+
+    // Dla admina: pełna lista zakupów
     @GetMapping
-    public String listaSamochodow(
-            @RequestParam(required = false) String marka,
-            @RequestParam(required = false) String model,
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) Integer minRok,
-            @RequestParam(required = false) Integer maxRok,
-            @RequestParam(required = false) Integer minPrzebieg,
-            @RequestParam(required = false) Integer maxPrzebieg,
-            @RequestParam(required = false) BigDecimal minCena,
-            @RequestParam(required = false) BigDecimal maxCena,
-            Model modelAttr) {
-
-        List<Samochod> samochody;
-
-        // Sprawdź czy są parametry wyszukiwania (uwzględniając puste stringi)
-        boolean hasSearchParams = (marka != null && !marka.trim().isEmpty()) ||
-                (model != null && !model.trim().isEmpty()) ||
-                (status != null && !status.trim().isEmpty()) ||
-                minRok != null || maxRok != null ||
-                minPrzebieg != null || maxPrzebieg != null ||
-                minCena != null || maxCena != null;
-
-        if (hasSearchParams) {
-            // Użyj zaawansowanego wyszukiwania
-            SamochodService.SearchCriteria criteria = new SamochodService.SearchCriteria();
-            criteria.setMarka(marka);
-            criteria.setModel(model);
-            criteria.setStatus(status);
-            criteria.setMinRok(minRok);
-            criteria.setMaxRok(maxRok);
-            criteria.setMinPrzebieg(minPrzebieg);
-            criteria.setMaxPrzebieg(maxPrzebieg);
-            criteria.setMinCena(minCena);
-            criteria.setMaxCena(maxCena);
-
-            samochody = samochodService.searchCars(criteria);
-
-            // DEBUG: Sprawdź wyniki wyszukiwania
-            System.out.println("DEBUG: Kryteria wyszukiwania: " + criteria);
-            System.out.println("DEBUG: Znaleziono samochodów: " + samochody.size());
-        } else {
-            // Pokaż wszystkie samochody
-            samochody = samochodService.findAll();
-        }
-
-        modelAttr.addAttribute("samochody", samochody);
-        modelAttr.addAttribute("marki", samochodService.findAllMarki());
-        modelAttr.addAttribute("tytul", "Lista Samochodów");
-        modelAttr.addAttribute("hasSearchParams", hasSearchParams);
-
-        // Przekaż parametry wyszukiwania z powrotem do formularza
-        modelAttr.addAttribute("searchMarka", marka);
-        modelAttr.addAttribute("searchModel", model);
-        modelAttr.addAttribute("searchStatus", status);
-        modelAttr.addAttribute("searchMinRok", minRok);
-        modelAttr.addAttribute("searchMaxRok", maxRok);
-        modelAttr.addAttribute("searchMinPrzebieg", minPrzebieg);
-        modelAttr.addAttribute("searchMaxPrzebieg", maxPrzebieg);
-        modelAttr.addAttribute("searchMinCena", minCena);
-        modelAttr.addAttribute("searchMaxCena", maxCena);
-
-        return "samochody/lista";
-    }
-
-    // Pozostałe metody pozostają bez zmian...
-    @GetMapping("/szczegoly")
-    public String szczegolySamochodu(@RequestParam("id") Long id, Model model) {
-        Samochod samochod = samochodService.findById(id)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-        model.addAttribute("samochod", samochod);
-        model.addAttribute("tytul", samochod.getMarka() + " " + samochod.getModel());
-        return "samochody/szczegoly";
-    }
-
-    // Formularz dodawania nowego samochodu - tylko ADMIN
-    @GetMapping("/nowy")
     @PreAuthorize("hasRole('ADMIN')")
-    public String formNowySamochod(Model model) {
-        model.addAttribute("samochod", new Samochod());
-        model.addAttribute("tytul", "Dodaj Nowy Samochód");
-        return "samochody/form";
+    public String listZakupy(Model model) {
+        List<Zakup> zakupy = zakupService.findAll();
+        System.out.println("DEBUG: Pobrano " + zakupy.size() + " zakupów");
+        model.addAttribute("zakupy", zakupy);
+        model.addAttribute("tytul", "Lista Wszystkich Zakupów");
+        return "zakupy/lista-admin";
     }
 
-    // Zapisywanie nowego samochodu - tylko ADMIN
-    @PostMapping("/zapisz")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String zapiszSamochod(@ModelAttribute Samochod samochod) {
-        // Ustaw domyślne wartości dla brakujących pól
-        if (samochod.getDataDodania() == null) {
-            samochod.setDataDodania(LocalDate.now());
-        }
-        if (samochod.getRodzajPaliwa() == null) {
-            samochod.setRodzajPaliwa("Benzyna");
-        }
-        if (samochod.getSkrzyniaBiegow() == null) {
-            samochod.setSkrzyniaBiegow("Manualna");
-        }
-        if (samochod.getPojemnoscSilnika() == null) {
-            samochod.setPojemnoscSilnika(2.0);
-        }
-
-        samochodService.save(samochod);
-        return "redirect:/samochody";
-    }
-
-    // Formularz edycji samochodu - tylko ADMIN
-    @GetMapping("/edytuj")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String formEdycjaSamochodu(@RequestParam("id") Long id, Model model) {
-        Samochod samochod = samochodService.findById(id)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-        model.addAttribute("samochod", samochod);
-        model.addAttribute("tytul", "Edytuj Samochód");
-        return "samochody/form";
-    }
-
-    // Aktualizacja samochodu - tylko ADMIN
-    @PostMapping("/edytuj")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String aktualizujSamochod(@RequestParam("id") Long id, @ModelAttribute Samochod samochod) {
-        samochod.setId(id);
-        samochodService.save(samochod);
-        return "redirect:/samochody";
-    }
-
-    // Usuwanie samochodu - tylko ADMIN
-    @PostMapping("/usun")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String usunSamochod(@RequestParam("id") Long id) {
-        samochodService.delete(id);
-        return "redirect:/samochody";
-    }
-
-    // Rezerwacja samochodu - dla zalogowanych użytkowników
-    @PostMapping("/zarezerwuj")
+    // W metodzie wykorzystajSaldoForm w ZakupController.java już masz:
+    @GetMapping("/wykorzystaj-saldo")
     @PreAuthorize("isAuthenticated()")
-    public String zarezerwujSamochod(@RequestParam("id") Long id) {
-        Samochod samochod = samochodService.findById(id)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-
-        if ("DOSTEPNY".equals(samochod.getStatus())) {
-            samochod.setStatus("ZAREZERWOWANY");
-            samochodService.save(samochod);
-        }
-
-        return "redirect:/samochody/szczegoly?id=" + id;
-    }
-
-    // Zakup samochodu - dla zalogowanych użytkowników
-    @PostMapping("/kup")
-    @PreAuthorize("isAuthenticated()")
-    public String kupSamochod(
-            @RequestParam("id") Long id,
-            Authentication authentication,
-            RedirectAttributes redirectAttributes) {
-
-        System.out.println("=== ROZPOCZĘCIE ZAKUPU SAMOCHODU ID: " + id + " ===");
-
-        Samochod samochod = samochodService.findById(id)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-
-        System.out.println("Znaleziono samochód: " + samochod.getMarka() + " " + samochod.getModel());
-        System.out.println("Status przed zakupem: " + samochod.getStatus());
-
-        // Pobierz aktualnego użytkownika
+    public String wykorzystajSaldoForm(@RequestParam Long samochodId,
+                                       @RequestParam BigDecimal cena,
+                                       Authentication authentication,
+                                       Model model) {
         String username = authentication.getName();
+
         User user = userService.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        System.out.println("Użytkownik: " + user.getUsername() + ", rola: " + user.getRole());
-
-        if ("DOSTEPNY".equals(samochod.getStatus()) || "ZAREZERWOWANY".equals(samochod.getStatus())) {
-            samochod.setStatus("SPRZEDANY");
-            samochodService.save(samochod);
-
-            System.out.println("Status zmieniony na: SPRZEDANY");
-
-            try {
-                // ============================================
-                // TWORZENIE REKORDU ZAKUPU W BAZIE DANYCH
-                // ============================================
-
-                // 1. Znajdź lub utwórz klienta
-                Klient klient = null;
-
-                // Sprawdź czy użytkownik ma powiązanego klienta
-                if (user.getKlient() != null) {
-                    klient = user.getKlient();
-                    System.out.println("Użytkownik ma powiązanego klienta: " + klient.getImie() + " " + klient.getNazwisko());
-                } else {
-                    // Spróbuj znaleźć klienta po emailu
-                    klient = klientService.findByEmail(user.getEmail())
-                            .orElse(null);
-
-                    if (klient == null) {
-                        // Utwórz nowego klienta na podstawie danych użytkownika
-                        System.out.println("Tworzę nowego klienta dla użytkownika: " + user.getUsername());
-                        klient = new Klient();
-                        klient.setImie(extractFirstName(user.getUsername()));
-                        klient.setNazwisko(extractLastName(user.getUsername()));
-                        klient.setEmail(user.getEmail());
-                        klient.setTelefon("Nie podano");
-                        klient = klientService.save(klient);
-                        System.out.println("Utworzono nowego klienta: " + klient.getImie() + " " + klient.getNazwisko());
-                    }
-
-                    // POWIĄŻ KLIENTA Z UŻYTKOWNIKIEM
-                    user.setKlient(klient);
-                    userService.updateUser(user);
-                    System.out.println("Powiązano klienta z użytkownikiem");
-                }
-
-                // 2. Znajdź pracownika (domyślnie pierwszy z bazy)
-                Pracownik pracownik = null;
-                List<Pracownik> wszyscyPracownicy = pracownikService.findAll();
-                if (!wszyscyPracownicy.isEmpty()) {
-                    pracownik = wszyscyPracownicy.get(0);
-                    System.out.println("Użyto pracownika: " + pracownik.getImie() + " " + pracownik.getNazwisko());
-                } else {
-                    // Utwórz domyślnego pracownika
-                    System.out.println("Brak pracowników w bazie - tworzę domyślnego...");
-                    Pracownik nowyPracownik = new Pracownik();
-                    nowyPracownik.setImie("Pracownik");
-                    nowyPracownik.setNazwisko("Domyślny");
-                    nowyPracownik.setStanowisko("Sprzedawca");
-                    nowyPracownik.setEmail("pracownik@komis.pl");
-                    nowyPracownik.setTelefon("111-222-333");
-                    nowyPracownik.setDataZatrudnienia(LocalDate.now());
-                    pracownik = pracownikService.save(nowyPracownik);
-                    System.out.println("Utworzono nowego pracownika: " + pracownik.getImie() + " " + pracownik.getNazwisko());
-                }
-
-                // 3. Stwórz obiekt Zakup
-                Zakup zakup = new Zakup();
-                zakup.setSamochod(samochod);
-                zakup.setKlient(klient);
-                zakup.setPracownik(pracownik);
-                zakup.setDataZakupu(LocalDate.now());
-                zakup.setCenaZakupu(samochod.getCena());
-
-                System.out.println("Tworzę zakup z danymi:");
-                System.out.println("- Samochód: " + samochod.getMarka() + " " + samochod.getModel());
-                System.out.println("- Klient: " + klient.getImie() + " " + klient.getNazwisko());
-                System.out.println("- Pracownik: " + pracownik.getImie() + " " + pracownik.getNazwisko());
-                System.out.println("- Cena: " + samochod.getCena());
-                System.out.println("- Data: " + LocalDate.now());
-
-                // 4. Zapisz zakup w bazie
-                Zakup zapisanyZakup = zakupService.save(zakup);
-                System.out.println("Zakup zapisany w bazie! ID: " + zapisanyZakup.getId());
-
-                if (user.getRole().equals("ADMIN")) {
-                    redirectAttributes.addFlashAttribute("successMessage",
-                            "Samochód sprzedany i zakup zarejestrowany w systemie!");
-                } else {
-                    redirectAttributes.addFlashAttribute("successMessage",
-                            "Samochód kupiony! Zakup zarejestrowany w systemie.");
-                }
-
-            } catch (Exception e) {
-                System.err.println("BŁĄD podczas tworzenia zakupu: " + e.getMessage());
-                e.printStackTrace();
-                redirectAttributes.addFlashAttribute("errorMessage",
-                        "Samochód oznaczony jako sprzedany, ale wystąpił błąd przy rejestracji zakupu: " + e.getMessage());
-            }
-        } else {
-            System.out.println("Samochód nie jest dostępny do sprzedaży. Aktualny status: " + samochod.getStatus());
-            redirectAttributes.addFlashAttribute("errorMessage",
-                    "Nie można kupić samochodu. Aktualny status: " + samochod.getStatus());
+        if (user.getKlient() == null) {
+            throw new RuntimeException("Nie masz powiązanego klienta");
         }
 
-        System.out.println("=== ZAKOŃCZENIE ZAKUPU ===");
-        return "redirect:/samochody/szczegoly?id=" + id;
-    }
+        Klient klient = klientService.findById(user.getKlient().getId())
+                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
 
-    // Anulowanie rezerwacji - dla zalogowanych użytkowników
-    @PostMapping("/anuluj-rezerwacje")
-    @PreAuthorize("isAuthenticated()")
-    public String anulujRezerwacje(@RequestParam("id") Long id) {
-        Samochod samochod = samochodService.findById(id)
+        // Pobierz samochód
+        Samochod samochod = samochodService.findById(samochodId)
                 .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
 
+        // SPRAWDŹ CZY SAMOCHÓD JEST ZAREZERWOWANY
         if ("ZAREZERWOWANY".equals(samochod.getStatus())) {
-            samochod.setStatus("DOSTEPNY");
-            samochodService.save(samochod);
+            if (samochod.getZarezerwowanyPrzez() == null) {
+                throw new RuntimeException("Samochód jest zarezerwowany, ale brak informacji o kliencie");
+            } else if (!samochod.getZarezerwowanyPrzez().getId().equals(klient.getId())) {
+                throw new RuntimeException("Ten samochód jest zarezerwowany przez innego klienta. " +
+                        "Tylko osoba rezerwująca może go kupić.");
+            }
         }
 
-        return "redirect:/samochody/szczegoly?id=" + id;
+        // Sprawdź czy samochód jest dostępny
+        if (!"DOSTEPNY".equals(samochod.getStatus()) && !"ZAREZERWOWANY".equals(samochod.getStatus())) {
+            throw new RuntimeException("Samochód nie jest dostępny do zakupu. Status: " + samochod.getStatus());
+        }
+
+        // Reszta metody pozostaje bez zmian...
+        model.addAttribute("samochodId", samochodId);
+        model.addAttribute("cenaBazowa", cena);
+        model.addAttribute("klient", klient);
+        model.addAttribute("saldoKlienta", klient.getSaldoPremii());
+        model.addAttribute("maksWykorzystanie", cena.min(klient.getSaldoPremii()));
+
+        // Dodaj informację o samochodzie do modelu
+        model.addAttribute("samochod", samochod);
+
+        // Dodaj info o premii
+        model.addAttribute("procentPremii", klient.getProcentPremii());
+        if (klient.getProcentPremii().compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal premia = cena.multiply(klient.getProcentPremii())
+                    .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+            model.addAttribute("premiaOdZakupu", premia);
+        }
+
+        // Dodaj listę pracowników
+        List<Pracownik> pracownicy = pracownikService.findAll();
+        model.addAttribute("pracownicy", pracownicy);
+
+        return "zakupy/wykorzystaj-saldo";
+    }
+    // POST - wykonanie zakupu z saldem
+    @PostMapping("/wykorzystaj-saldo")
+    @PreAuthorize("isAuthenticated()")
+    public String wykonajZakupZSaldem(@RequestParam Long samochodId,
+                                      @RequestParam BigDecimal cenaBazowa,
+                                      @RequestParam(required = false) BigDecimal wykorzystaneSaldo,
+                                      @RequestParam Long pracownikId,
+                                      Authentication authentication,
+                                      RedirectAttributes redirectAttributes) {  // DODANO RedirectAttributes
+
+        try {
+            String username = authentication.getName();
+            User user = userService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            Klient klient = user.getKlient();
+            if (klient == null) {
+                throw new RuntimeException("Nie masz powiązanego klienta");
+            }
+
+            // Pobierz samochód
+            Samochod samochod = samochodService.findById(samochodId)
+                    .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+            // Sprawdź dostępność samochodu
+            if (!samochod.getStatus().equals("DOSTEPNY") &&
+                    !samochod.getStatus().equals("ZAREZERWOWANY")) {
+                throw new RuntimeException("Samochód nie jest dostępny do zakupu. Status: " + samochod.getStatus());
+            }
+
+            // Jeśli klient zarezerwował ten samochód, to tylko on może go kupić
+            if (samochod.getStatus().equals("ZAREZERWOWANY") &&
+                    (samochod.getZarezerwowanyPrzez() == null ||
+                            !samochod.getZarezerwowanyPrzez().getId().equals(klient.getId()))) {
+                throw new RuntimeException("Ten samochód jest zarezerwowany przez innego klienta. " +
+                        "Tylko osoba rezerwująca może go kupić.");
+            }
+
+            // Pobierz pracownika
+            Pracownik pracownik = pracownikService.findById(pracownikId)
+                    .orElseThrow(() -> new RuntimeException("Pracownik nie znaleziony"));
+
+            // Obsłuż wykorzystanie salda (jeśli podano)
+            BigDecimal faktycznieWykorzystaneSaldo = BigDecimal.ZERO;
+            if (wykorzystaneSaldo != null && wykorzystaneSaldo.compareTo(BigDecimal.ZERO) > 0) {
+                // Sprawdź czy klient ma wystarczające saldo
+                if (klient.getSaldoPremii().compareTo(wykorzystaneSaldo) < 0) {
+                    throw new RuntimeException("Niewystarczające saldo premii");
+                }
+                faktycznieWykorzystaneSaldo = wykorzystaneSaldo.min(cenaBazowa);
+            }
+
+            // Oblicz naliczoną premię
+            BigDecimal naliczonaPremia = BigDecimal.ZERO;
+            if (klient.getProcentPremii() != null &&
+                    klient.getProcentPremii().compareTo(BigDecimal.ZERO) > 0) {
+                naliczonaPremia = cenaBazowa
+                        .multiply(klient.getProcentPremii())
+                        .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+            }
+
+            // Oblicz końcową cenę zakupu
+            BigDecimal cenaZakupu = cenaBazowa.subtract(faktycznieWykorzystaneSaldo);
+
+            // Utwórz zakup
+            Zakup zakup = new Zakup();
+            zakup.setSamochod(samochod);
+            zakup.setKlient(klient);
+            zakup.setPracownik(pracownik);
+            zakup.setCenaBazowa(cenaBazowa);
+            zakup.setWykorzystaneSaldo(faktycznieWykorzystaneSaldo);
+            zakup.setNaliczonaPremia(naliczonaPremia);
+            zakup.setCenaZakupu(cenaZakupu);
+            zakup.setDataZakupu(LocalDate.from(LocalDateTime.now()));
+            zakup.setZastosowanyRabat(klient.getProcentPremii());
+
+            // Zapisz zakup
+            zakupService.save(zakup);
+
+            // ZMIANA STATUSU SAMOCHODU NA SPRZEDANY
+            samochod.setStatus("SPRZEDANY");
+            samochod.setZarezerwowanyPrzez(null); // Wyczyść rezerwację po zakupie
+            samochod.setDataRezerwacji(null);
+            samochodService.save(samochod);
+
+            // Aktualizuj dane klienta (liczba zakupów, wydane kwoty)
+            klient.setLiczbaZakupow(klient.getLiczbaZakupow() + 1);
+            klient.setTotalWydane(klient.getTotalWydane().add(cenaZakupu));
+
+            // Dodaj premię do salda klienta
+            klient.setSaldoPremii(klient.getSaldoPremii().add(naliczonaPremia));
+
+            // Odejmij wykorzystane saldo
+            klient.setSaldoPremii(klient.getSaldoPremii().subtract(faktycznieWykorzystaneSaldo));
+
+            // Aktualizuj procent premii na podstawie liczby zakupów
+            if (klient.getLiczbaZakupow() >= 5) {
+                klient.setProcentPremii(new BigDecimal("15"));
+            } else if (klient.getLiczbaZakupow() >= 3) {
+                klient.setProcentPremii(new BigDecimal("10"));
+            } else if (klient.getLiczbaZakupow() >= 2) {
+                klient.setProcentPremii(new BigDecimal("5"));
+            } else {
+                klient.setProcentPremii(BigDecimal.ZERO);
+            }
+
+            klientService.save(klient);
+
+            // Przygotuj komunikat sukcesu
+            String message;
+            if (faktycznieWykorzystaneSaldo.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal zaoszczedzone = faktycznieWykorzystaneSaldo;
+                message = String.format(
+                        "Samochód kupiony z wykorzystaniem salda!<br>" +
+                                "Wykorzystano saldo: <strong>%.2f zł</strong><br>" +
+                                "Na Twoje saldo dodano: <strong>%.2f zł</strong> premii<br>" +
+                                "Nowe saldo: <strong>%.2f zł</strong>",
+                        zaoszczedzone, naliczonaPremia, klient.getSaldoPremii()
+                );
+            } else {
+                message = String.format(
+                        "Samochód kupiony pomyślnie!<br>" +
+                                "Na Twoje saldo dodano: <strong>%.2f zł</strong> premii",
+                        naliczonaPremia
+                );
+            }
+
+            redirectAttributes.addFlashAttribute("successMessage", message);
+
+            return "redirect:/zakupy/moje";
+
+        } catch (Exception e) {
+            System.err.println("Błąd podczas zakupu z wykorzystaniem salda: " + e.getMessage());
+            e.printStackTrace();
+
+            // Przekieruj z błędem
+            redirectAttributes.addFlashAttribute("errorMessage",
+                    "Błąd podczas zakupu: " + e.getMessage());
+            return "redirect:/samochody/szczegoly?id=" + samochodId;
+        }
     }
 
-    // Pomocnicze metody do ekstrakcji imienia i nazwiska z username
-    private String extractFirstName(String username) {
-        if (username == null || username.isEmpty()) return "Użytkownik";
-        String[] parts = username.split("\\.");
-        if (parts.length > 0) return capitalize(parts[0]);
-        return capitalize(username);
+    // Dla użytkownika: tylko jego zakupy - ZMIENIONE: teraz przekazujemy obiekt Klient
+    @GetMapping("/moje")
+    @PreAuthorize("isAuthenticated()")
+    public String mojeZakupy(Authentication authentication, Model model) {
+        String username = authentication.getName();
+
+        try {
+            User user = userService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            List<Zakup> zakupy = List.of();
+            Klient klient = null;
+
+            // Użyj metody ensureUserHasKlient zamiast ręcznego tworzenia
+            klient = userService.ensureUserHasKlient(user.getId());
+
+            // Pobierz zakupy klienta
+            Long klientId = klient.getId();
+            zakupy = zakupService.findByKlientId(klientId);
+
+            // OBLICZ SUMY DLA STATYSTYK
+            BigDecimal sumaCenaBazowa = zakupy.stream()
+                    .map(z -> z.getCenaBazowa() != null ? z.getCenaBazowa() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaWykorzystaneSaldo = zakupy.stream()
+                    .map(z -> z.getWykorzystaneSaldo() != null ? z.getWykorzystaneSaldo() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaNaliczonaPremia = zakupy.stream()
+                    .map(z -> z.getNaliczonaPremia() != null ? z.getNaliczonaPremia() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaCenaZakupu = zakupy.stream()
+                    .map(z -> z.getCenaZakupu() != null ? z.getCenaZakupu() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Dodaj do modelu
+            model.addAttribute("sumaCenaBazowa", sumaCenaBazowa);
+            model.addAttribute("sumaWykorzystaneSaldo", sumaWykorzystaneSaldo);
+            model.addAttribute("sumaNaliczonaPremia", sumaNaliczonaPremia);
+            model.addAttribute("sumaCenaZakupu", sumaCenaZakupu);
+
+            System.out.println("DEBUG: Klient ID: " + klientId);
+            System.out.println("DEBUG: Procent premii: " + klient.getProcentPremii() + "%");
+            System.out.println("DEBUG: Saldo premii: " + klient.getSaldoPremii() + " zł");
+            System.out.println("DEBUG: Łącznie wydano: " + klient.getTotalWydane() + " zł");
+            System.out.println("DEBUG: Liczba zakupów: " + klient.getLiczbaZakupow());
+
+            model.addAttribute("zakupy", zakupy);
+            model.addAttribute("klient", klient);
+            model.addAttribute("tytul", "Moje Zakupy");
+            model.addAttribute("username", username);
+            return "zakupy/lista-klient";
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD w mojeZakupy: " + e.getMessage());
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupów: " + e.getMessage());
+            return "error";
+        }
+    }
+    // GET - szczegóły zakupów klienta (dla admina)
+    @GetMapping("/moje/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String zakupyKlienta(@PathVariable Long id, Model model) {
+        try {
+            // Znajdź klienta
+            Klient klient = klientService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
+
+            // Pobierz zakupy klienta
+            List<Zakup> zakupy = zakupService.findByKlientId(id);
+
+            // Oblicz statystyki
+            BigDecimal sumaCenaBazowa = zakupy.stream()
+                    .map(z -> z.getCenaBazowa() != null ? z.getCenaBazowa() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaWykorzystaneSaldo = zakupy.stream()
+                    .map(z -> z.getWykorzystaneSaldo() != null ? z.getWykorzystaneSaldo() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaNaliczonaPremia = zakupy.stream()
+                    .map(z -> z.getNaliczonaPremia() != null ? z.getNaliczonaPremia() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaCenaZakupu = zakupy.stream()
+                    .map(z -> z.getCenaZakupu() != null ? z.getCenaZakupu() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Dodaj do modelu
+            model.addAttribute("zakupy", zakupy);
+            model.addAttribute("klient", klient);
+            model.addAttribute("sumaCenaBazowa", sumaCenaBazowa);
+            model.addAttribute("sumaWykorzystaneSaldo", sumaWykorzystaneSaldo);
+            model.addAttribute("sumaNaliczonaPremia", sumaNaliczonaPremia);
+            model.addAttribute("sumaCenaZakupu", sumaCenaZakupu);
+            model.addAttribute("tytul", "Zakupy klienta: " + klient.getImie() + " " + klient.getNazwisko());
+
+            return "zakupy/lista-klient";
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD w zakupyKlienta: " + e.getMessage());
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupów: " + e.getMessage());
+            return "error";
+        }
     }
 
-    private String extractLastName(String username) {
-        if (username == null || username.isEmpty()) return "Klient";
-        String[] parts = username.split("\\.");
-        if (parts.length > 1) return capitalize(parts[1]);
-        return "Klient";
+    // GET - szczegóły konkretnego zakupu (dla admina)
+    @GetMapping("/szczegoly/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String szczegolyZakupu(@PathVariable Long id, Model model) {
+        try {
+            Zakup zakup = zakupService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
+
+            model.addAttribute("zakup", zakup);
+            model.addAttribute("tytul", "Szczegóły zakupu #" + zakup.getId());
+
+            return "zakupy/szczegoly";
+        } catch (Exception e) {
+            System.err.println("BŁĄD w szczegolyZakupu: " + e.getMessage());
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupu: " + e.getMessage());
+            return "error";
+        }
+
     }
 
-    private String capitalize(String str) {
-        if (str == null || str.isEmpty()) return str;
-        return str.substring(0, 1).toUpperCase() + str.substring(1).toLowerCase();
+
+    // Pomocnicza metoda do znajdowania zakupów po emailu klienta
+    private List<Zakup> findZakupyByUserEmail(String email) {
+        // Najpierw znajdź klienta po emailu
+        return klientService.findByEmail(email)
+                .map(klient -> zakupService.findByKlientId(klient.getId()))
+                .orElse(List.of());
     }
+
+
+    // Usuwanie tylko dla admina
+    @PostMapping("/usun/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String deleteZakup(@PathVariable Long id) {
+        zakupService.remove(id);
+        return "redirect:/zakupy";
+    }
+}
+
+
+�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\service\ZakupService.java
+----------------------------------------------------------------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import pl.komis.model.*;
+import pl.komis.repository.*;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class ZakupService {
+
+    private final ZakupRepository zakupRepository;
+    private final KlientRepository klientRepository;
+    private final SamochodService samochodService;
+    private final PracownikService pracownikService;
+    private final UserService userService;
+
+    public Zakup createZakupZSaldem(Long samochodId, Long userId, Long pracownikId,
+                                    BigDecimal cenaBazowa, BigDecimal wykorzystaneSaldo) {
+        // Pobierz samochód
+        Samochod samochod = samochodService.findById(samochodId)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+        // Pobierz użytkownika
+        User user = userService.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        // Pobierz klienta
+        Klient klient = user.getKlient();
+        if (klient == null) {
+            throw new RuntimeException("Użytkownik nie ma powiązanego klienta");
+        }
+
+        // Pobierz pracownika
+        Pracownik pracownik = pracownikService.findById(pracownikId)
+                .orElseThrow(() -> new RuntimeException("Pracownik nie znaleziony"));
+
+        // Walidacja: wykorzystane saldo nie może przekraczać ceny samochodu
+        if (wykorzystaneSaldo != null && wykorzystaneSaldo.compareTo(cenaBazowa) > 0) {
+            throw new RuntimeException("Wykorzystane saldo nie może przekraczać ceny samochodu");
+        }
+
+        // Walidacja: sprawdź czy klient ma wystarczające saldo
+        BigDecimal faktycznieWykorzystane = (wykorzystaneSaldo != null) ? wykorzystaneSaldo : BigDecimal.ZERO;
+        if (faktycznieWykorzystane.compareTo(BigDecimal.ZERO) > 0) {
+            if (klient.getSaldoPremii() == null ||
+                    klient.getSaldoPremii().compareTo(faktycznieWykorzystane) < 0) {
+                throw new RuntimeException("Niewystarczające saldo premii. Masz: " +
+                        klient.getSaldoPremii() + " zł, a potrzebujesz: " +
+                        faktycznieWykorzystane + " zł");
+            }
+        }
+
+        // Oblicz cenę końcową (trigger w bazie również to zrobi, ale potrzebujemy w Javie)
+        BigDecimal cenaKoncowa = cenaBazowa.subtract(faktycznieWykorzystane);
+
+        // Pobierz aktualny procent premii klienta
+        BigDecimal procentPremii = klient.getProcentPremii();
+
+        // Oblicz premię od tego zakupu (procent od ceny bazowej)
+        // UWAGA: Trigger w bazie również to obliczy i zapisze!
+        BigDecimal naliczonaPremia = BigDecimal.ZERO;
+        if (procentPremii != null && procentPremii.compareTo(BigDecimal.ZERO) > 0) {
+            naliczonaPremia = cenaBazowa.multiply(procentPremii)
+                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+        }
+
+        // Utwórz nowy zakup
+        Zakup zakup = Zakup.builder()
+                .samochod(samochod)
+                .klient(klient)
+                .pracownik(pracownik)
+                .dataZakupu(LocalDate.now())
+                .cenaBazowa(cenaBazowa)
+                .cenaZakupu(cenaKoncowa)
+                .zastosowanyRabat(procentPremii)
+                .naliczonaPremia(naliczonaPremia)
+                .wykorzystaneSaldo(faktycznieWykorzystane)
+                .build();
+
+        // NIE aktualizujemy ręcznie salda klienta - robi to trigger!
+        // Trigger w bazie:
+        // 1. Doda naliczoną premię do saldo_premii
+        // 2. Odejmie wykorzystane_saldo
+        // 3. Zaktualizuje procent_premii na następny zakup
+
+        return zakupRepository.save(zakup); // Trigger zadziała przy zapisie!
+    }
+
+    // ==================== METODY ODCZYTU ====================
+
+    public List<Zakup> findAll() {
+        return zakupRepository.findAll();
+    }
+
+    public Optional<Zakup> findById(Long id) {
+        return zakupRepository.findById(id);
+    }
+
+    public Zakup getById(Long id) {
+        return zakupRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
+    }
+
+    public List<Zakup> findByKlientId(Long id) {
+        return zakupRepository.findByKlientId(id);
+    }
+
+    public List<Zakup> findByPracownikId(Long id) {
+        return zakupRepository.findByPracownikId(id);
+    }
+
+    public List<Zakup> findByDateRange(LocalDate od, LocalDate do_) {
+        return zakupRepository.findByDataZakupuBetween(od, do_);
+    }
+
+    // ==================== METODY ZAPISU ====================
+
+    public Zakup save(Zakup zakup) {
+        return zakupRepository.save(zakup);
+    }
+
+    // ==================== METODY USUWANIA ====================
+
+    public void remove(Long id) {
+        Zakup zakup = zakupRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
+        zakupRepository.delete(zakup);
+    }
+
+    public void delete(Long id) {
+        zakupRepository.deleteById(id);
+    }
+
+    // ==================== METODY POMOCNICZE ====================
+
+    // Metoda do pobierania salda klienta (do wyświetlania w UI)
+    public BigDecimal pobierzSaldoKlienta(Long klientId) {
+        Klient klient = klientRepository.findById(klientId)
+                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
+        return klient.getSaldoPremii();
+    }
+
+    // Nowa metoda: Sprawdź czy klient może wykorzystać saldo
+    public boolean czyMozeWykorzystacSaldo(Long klientId, BigDecimal kwota) {
+        if (kwota == null || kwota.compareTo(BigDecimal.ZERO) <= 0) {
+            return false;
+        }
+
+        Klient klient = klientRepository.findById(klientId)
+                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
+
+        return klient.getSaldoPremii() != null &&
+                klient.getSaldoPremii().compareTo(kwota) >= 0;
+    }
+
+    // ==================== METODY STATYSTYCZNE ====================
+
+    public BigDecimal getSumaWydatkowKlienta(Long klientId) {
+        List<Zakup> zakupy = findByKlientId(klientId);
+        return zakupy.stream()
+                .map(Zakup::getCenaZakupu)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public BigDecimal getSumaWykorzystanegoSaldaKlienta(Long klientId) {
+        List<Zakup> zakupy = findByKlientId(klientId);
+        return zakupy.stream()
+                .map(Zakup::getWykorzystaneSaldo)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public int getLiczbaZakupowKlienta(Long klientId) {
+        List<Zakup> zakupy = findByKlientId(klientId);
+        return zakupy.size();
+    }
+
+    public BigDecimal getSredniaWartoscZakupuKlienta(Long klientId) {
+        List<Zakup> zakupy = findByKlientId(klientId);
+        if (zakupy.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+
+        BigDecimal suma = getSumaWydatkowKlienta(klientId);
+        return suma.divide(BigDecimal.valueOf(zakupy.size()), 2, RoundingMode.HALF_UP);
+    }
+
+    // ==================== METODY WALIDACYJNE ====================
+
+    public boolean isSamochodKupiony(Long samochodId) {
+        // Sprawdź czy istnieje zakup dla tego samochodu
+        return zakupRepository.existsBySamochodId(samochodId);
+    }
+
+    public boolean isSamochodKupionyPrzezKlienta(Long samochodId, Long klientId) {
+        return zakupRepository.existsBySamochodIdAndKlientId(samochodId, klientId);
+    }
+
+    // ==================== METODY RAPORTOWE ====================
+
+    public List<Object[]> getStatystykiMiesieczne(int rok) {
+        return zakupRepository.findMonthlyStatistics(rok);
+    }
+
+    public List<Object[]> getStatystykiRoczne() {
+        return zakupRepository.findYearlyStatistics();
+    }
+
+    public List<Object[]> getTopKlienci(int limit) {
+        return zakupRepository.findTopKlienci(limit);
+    }
+
+    public List<Object[]> getTopPracownicy(int limit) {
+        return zakupRepository.findTopPracownicy(limit);
+    }
+}
+
+
+�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\model\Zakup.java
+-------------------------------------------------------------------------------------------------------
+package pl.komis.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.DynamicUpdate;
+
+import java.time.LocalDate;
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "zakupy")
+@DynamicUpdate
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder(toBuilder = true)  // DODAJ toBuilder = true
+public class Zakup {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_samochodu")
+    private Samochod samochod;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_klienta")
+    private Klient klient;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_pracownika")
+    private Pracownik pracownik;
+
+    private LocalDate dataZakupu;
+
+    @Column(precision = 12, scale = 2)
+    private BigDecimal cenaZakupu; // Cena ostateczna (po ewentualnym wykorzystaniu salda)
+
+    @Column(name = "cena_bazowa", precision = 12, scale = 2)
+    private BigDecimal cenaBazowa; // Cena przed zastosowaniem salda
+
+    @Column(name = "zastosowany_rabat", precision = 5, scale = 2)
+    private BigDecimal zastosowanyRabat = BigDecimal.ZERO; // Procent premii naliczonej
+
+    @Column(name = "naliczona_premia", precision = 12, scale = 2)
+    private BigDecimal naliczonaPremia = BigDecimal.ZERO; // Kwota premii z tego zakupu
+
+    @Column(name = "wykorzystane_saldo", precision = 12, scale = 2)
+    private BigDecimal wykorzystaneSaldo = BigDecimal.ZERO; // Kwota wykorzystanego salda
+
+    // Alternatywnie: użyj @Builder.Default dla pól z domyślnymi wartościami
+    // @Builder.Default
+    // private BigDecimal naliczonaPremia = BigDecimal.ZERO;
+
+    // Metoda pomocnicza do obliczania zaoszczędzonej kwoty
+    public BigDecimal getZaoszczedzonaKwota() {
+        if (cenaBazowa != null && cenaZakupu != null) {
+            return cenaBazowa.subtract(cenaZakupu);
+        }
+        return BigDecimal.ZERO;
+    }
+
+    // Metoda pomocnicza - czy wykorzystano saldo?
+    public boolean czyWykorzystanoSaldo() {
+        return wykorzystaneSaldo != null && wykorzystaneSaldo.compareTo(BigDecimal.ZERO) > 0;
+    }
+}
+
+
+�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\service\KlientService.java
+-----------------------------------------------------------------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import pl.komis.model.Klient;
+import pl.komis.repository.KlientRepository;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class KlientService {
+
+    private final KlientRepository klientRepository;
+
+    public List<Klient> findAll() {
+        return klientRepository.findAll();
+    }
+
+    public Optional<Klient> findById(Long id) {
+        return klientRepository.findById(id);
+    }
+
+    public Optional<Klient> findByEmail(String email) {
+        return klientRepository.findByEmail(email);
+    }
+
+    public Klient save(Klient klient) {
+        return klientRepository.save(klient);
+    }
+
+    public void delete(Long id) {
+        klientRepository.deleteById(id);
+    }
+
+    public Integer getLiczbaZakupow(Long klientId) {
+        return klientRepository.findById(klientId)
+                .map(Klient::getLiczbaZakupow)
+                .orElse(0);
+    }
+
+    public BigDecimal getSaldoPremii(Long klientId) {
+        return klientRepository.findById(klientId)
+                .map(Klient::getSaldoPremii)
+                .orElse(BigDecimal.ZERO);
+    }
+
+    public BigDecimal getProcentPremii(Long klientId) {
+        return klientRepository.findById(klientId)
+                .map(Klient::getProcentPremii)
+                .orElse(BigDecimal.ZERO);
+    }
+
+    public BigDecimal getTotalWydane(Long klientId) {
+        return klientRepository.findById(klientId)
+                .map(Klient::getTotalWydane)
+                .orElse(BigDecimal.ZERO);
+    }
+}
+
+
+�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\repository\ZakupRepository.java
+----------------------------------------------------------------------------------------------------------------------
+package pl.komis.repository;
+
+import pl.komis.model.Zakup;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDate;
+import java.util.List;
+
+@Repository
+public interface ZakupRepository extends JpaRepository<Zakup, Long> {
+
+    List<Zakup> findByKlientId(Long klientId);
+
+    List<Zakup> findByPracownikId(Long pracownikId);
+
+    List<Zakup> findByDataZakupuBetween(LocalDate startDate, LocalDate endDate);
+
+    // Dodaj te metody jeśli ich nie ma:
+    boolean existsBySamochodId(Long samochodId);
+
+    boolean existsBySamochodIdAndKlientId(Long samochodId, Long klientId);
+
+    @Query("SELECT YEAR(z.dataZakupu) as rok, MONTH(z.dataZakupu) as miesiac, " +
+            "COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaSprzedazy " +
+            "FROM Zakup z " +
+            "WHERE YEAR(z.dataZakupu) = :rok " +
+            "GROUP BY YEAR(z.dataZakupu), MONTH(z.dataZakupu) " +
+            "ORDER BY rok, miesiac")
+    List<Object[]> findMonthlyStatistics(@Param("rok") int rok);
+
+    @Query("SELECT YEAR(z.dataZakupu) as rok, " +
+            "COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaSprzedazy " +
+            "FROM Zakup z " +
+            "GROUP BY YEAR(z.dataZakupu) " +
+            "ORDER BY rok")
+    List<Object[]> findYearlyStatistics();
+
+    @Query("SELECT z.klient, COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaWydatkow " +
+            "FROM Zakup z " +
+            "GROUP BY z.klient " +
+            "ORDER BY sumaWydatkow DESC")
+    List<Object[]> findTopKlienci(@Param("limit") int limit);
+
+    @Query("SELECT z.pracownik, COUNT(z) as liczbaSprzedazy, SUM(z.cenaZakupu) as sumaSprzedazy " +
+            "FROM Zakup z " +
+            "GROUP BY z.pracownik " +
+            "ORDER BY sumaSprzedazy DESC")
+    List<Object[]> findTopPracownicy(@Param("limit") int limit);
 }

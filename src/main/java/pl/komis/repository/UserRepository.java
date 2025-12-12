@@ -1,10 +1,11 @@
 package pl.komis.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.jpa.repository.query.Procedure;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 import pl.komis.model.User;
 
 import java.util.List;
@@ -36,27 +37,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query(value = "SELECT * FROM get_user_statistics()", nativeQuery = true)
     Map<String, Object> getUserStatisticsNative();
 
-    // ==================== PROCEDURY ====================
+    // ==================== USUNIĘTO PROCEDURY KTÓRE POWODUJĄ BŁĘDY ====================
 
-    @Procedure(procedureName = "create_user")
-    Long createUser(
-            @Param("p_username") String username,
-            @Param("p_email") String email,
-            @Param("p_password") String password,
-            @Param("p_role") String role,
-            @Param("p_enabled") Boolean enabled
-    );
+    // Zostawiamy tylko metodę do statystyk, która działa
+    // Procedury create_user, update_user, delete_user zostały usunięte
+    // ponieważ powodują błędy w obecnej konfiguracji bazy danych
 
-    @Procedure(procedureName = "update_user")
-    void updateUser(
-            @Param("p_id") Long id,
-            @Param("p_username") String username,
-            @Param("p_email") String email,
-            @Param("p_password") String password,
-            @Param("p_role") String role,
-            @Param("p_enabled") Boolean enabled
-    );
-
-    @Procedure(procedureName = "delete_user")
-    void deleteUser(@Param("p_id") Long id);
 }
