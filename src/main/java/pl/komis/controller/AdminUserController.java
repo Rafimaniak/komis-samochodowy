@@ -68,8 +68,14 @@ public class AdminUserController {
                              @RequestParam(value = "newPassword", required = false) String newPassword,
                              RedirectAttributes redirectAttributes) {
         try {
+            System.out.println("=== ROZPOCZĘCIE AKTUALIZACJI UŻYTKOWNIKA ID: " + id + " ===");
+            System.out.println("Nowe hasło podane: " + (newPassword != null && !newPassword.isEmpty() ? "TAK" : "NIE"));
+
             User existingUser = userService.findById(id)
                     .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            System.out.println("Znaleziono użytkownika: " + existingUser.getUsername());
+            System.out.println("Stare hasło (hash): " + existingUser.getPassword());
 
             existingUser.setUsername(user.getUsername());
             existingUser.setEmail(user.getEmail());
@@ -78,12 +84,19 @@ public class AdminUserController {
 
             // Zmiana hasła jeśli podano nowe
             if (newPassword != null && !newPassword.trim().isEmpty()) {
-                existingUser.setPassword(passwordEncoder.encode(newPassword));
+                String encodedPassword = passwordEncoder.encode(newPassword.trim());
+                System.out.println("Nowe hasło (hash): " + encodedPassword);
+                existingUser.setPassword(encodedPassword);
             }
 
-            userService.updateUser(existingUser);
+            // Używamy metody save zamiast updateUser
+            userService.saveUser(existingUser);
+
+            System.out.println("=== ZAKOŃCZENO AKTUALIZACJĘ ===");
             redirectAttributes.addFlashAttribute("successMessage", "Użytkownik został zaktualizowany pomyślnie");
         } catch (Exception e) {
+            System.err.println("=== BŁĄD AKTUALIZACJI: " + e.getMessage());
+            e.printStackTrace();
             redirectAttributes.addFlashAttribute("errorMessage", "Błąd podczas aktualizacji użytkownika: " + e.getMessage());
         }
         return "redirect:/admin/users";
@@ -112,11 +125,16 @@ public class AdminUserController {
             User user = userService.findById(id)
                     .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-            user.setPassword(passwordEncoder.encode(newPassword));
-            userService.updateUser(user);
+            String encodedPassword = passwordEncoder.encode(newPassword);
+            user.setPassword(encodedPassword);
+
+            // Używamy metody save
+            userService.saveUser(user);
 
             redirectAttributes.addFlashAttribute("successMessage", "Hasło zostało zmienione pomyślnie");
         } catch (Exception e) {
+            System.err.println("BŁĄD podczas zmiany hasła: " + e.getMessage());
+            e.printStackTrace();
             redirectAttributes.addFlashAttribute("errorMessage", "Błąd podczas zmiany hasła: " + e.getMessage());
         }
         return "redirect:/admin/users";
@@ -129,7 +147,7 @@ public class AdminUserController {
                     .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
             user.setEnabled(!user.getEnabled());
-            userService.updateUser(user);
+            userService.saveUser(user);
 
             String status = user.getEnabled() ? "aktywowane" : "dezaktywowane";
             redirectAttributes.addFlashAttribute("successMessage",

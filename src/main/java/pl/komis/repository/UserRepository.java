@@ -20,8 +20,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByUsername(String username);
     boolean existsByEmail(String email);
 
-    // ==================== NOWE EFEKTYWNE METODY ====================
-
     @Query("SELECT u FROM User u WHERE u.role = :role")
     List<User> findByRole(@Param("role") String role);
 
@@ -37,10 +35,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query(value = "SELECT * FROM get_user_statistics()", nativeQuery = true)
     Map<String, Object> getUserStatisticsNative();
 
-    // ==================== USUNIĘTO PROCEDURY KTÓRE POWODUJĄ BŁĘDY ====================
-
-    // Zostawiamy tylko metodę do statystyk, która działa
-    // Procedury create_user, update_user, delete_user zostały usunięte
-    // ponieważ powodują błędy w obecnej konfiguracji bazy danych
-
+    // Dodaj jeśli nie masz:
+    @Modifying
+    @Transactional
+    @Query("UPDATE User u SET u.password = :password WHERE u.id = :id")
+    int updatePassword(@Param("id") Long id, @Param("password") String password);
 }

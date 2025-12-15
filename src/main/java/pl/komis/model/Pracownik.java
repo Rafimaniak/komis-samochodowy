@@ -28,8 +28,6 @@ public class Pracownik {
     private String email;
     private LocalDate dataZatrudnienia;
 
-    @OneToMany(mappedBy = "pracownik")
-    private List<Sprzedaz> sprzedaze = new ArrayList<>();
 
     @OneToMany(mappedBy = "pracownik")
     private List<Serwis> serwisy = new ArrayList<>();

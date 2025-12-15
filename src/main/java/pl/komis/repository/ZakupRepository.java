@@ -2,10 +2,14 @@ package pl.komis.repository;
 
 import pl.komis.model.Zakup;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.query.Procedure;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -13,40 +17,28 @@ import java.util.List;
 public interface ZakupRepository extends JpaRepository<Zakup, Long> {
 
     List<Zakup> findByKlientId(Long klientId);
-
     List<Zakup> findByPracownikId(Long pracownikId);
-
     List<Zakup> findByDataZakupuBetween(LocalDate startDate, LocalDate endDate);
-
-    // Dodaj te metody jeśli ich nie ma:
     boolean existsBySamochodId(Long samochodId);
-
     boolean existsBySamochodIdAndKlientId(Long samochodId, Long klientId);
 
-    @Query("SELECT YEAR(z.dataZakupu) as rok, MONTH(z.dataZakupu) as miesiac, " +
-            "COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaSprzedazy " +
-            "FROM Zakup z " +
-            "WHERE YEAR(z.dataZakupu) = :rok " +
-            "GROUP BY YEAR(z.dataZakupu), MONTH(z.dataZakupu) " +
-            "ORDER BY rok, miesiac")
-    List<Object[]> findMonthlyStatistics(@Param("rok") int rok);
+    // Nowe metody wykorzystujące procedury/funkcje z bazy
+    @Transactional
+    @Procedure(name = "dodaj_zakup")
+    Long dodajZakupZProcedury(
+            @Param("p_nowy_id_zakupu") Long nowyIdZakupu,  // OUT parameter musi być pierwszy
+            @Param("p_id_samochodu") Long samochodId,
+            @Param("p_id_klienta") Long klientId,
+            @Param("p_id_pracownika") Long pracownikId,
+            @Param("p_cena_bazowa") BigDecimal cenaBazowa,
+            @Param("p_wykorzystane_saldo") BigDecimal wykorzystaneSaldo
+    );
 
-    @Query("SELECT YEAR(z.dataZakupu) as rok, " +
-            "COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaSprzedazy " +
-            "FROM Zakup z " +
-            "GROUP BY YEAR(z.dataZakupu) " +
-            "ORDER BY rok")
-    List<Object[]> findYearlyStatistics();
+    @Transactional
+    @Modifying
+    @Query(value = "CALL usun_zakup(:idZakupu)", nativeQuery = true)
+    void usunZakupZProcedury(@Param("idZakupu") Long idZakupu);
 
-    @Query("SELECT z.klient, COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaWydatkow " +
-            "FROM Zakup z " +
-            "GROUP BY z.klient " +
-            "ORDER BY sumaWydatkow DESC")
-    List<Object[]> findTopKlienci(@Param("limit") int limit);
-
-    @Query("SELECT z.pracownik, COUNT(z) as liczbaSprzedazy, SUM(z.cenaZakupu) as sumaSprzedazy " +
-            "FROM Zakup z " +
-            "GROUP BY z.pracownik " +
-            "ORDER BY sumaSprzedazy DESC")
-    List<Object[]> findTopPracownicy(@Param("limit") int limit);
+    @Query(value = "SELECT * FROM znajdz_zakupy_klienta(:idKlienta)", nativeQuery = true)
+    List<Object[]> znajdzZakupyKlientaZProcedury(@Param("idKlienta") Long idKlienta);
 }

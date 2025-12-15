@@ -5,8 +5,11 @@ import org.springframework.stereotype.Service;
 import pl.komis.model.*;
 import pl.komis.repository.*;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.ParameterMode;
+import jakarta.persistence.StoredProcedureQuery;
+import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -20,24 +23,24 @@ public class ZakupService {
     private final SamochodService samochodService;
     private final PracownikService pracownikService;
     private final UserService userService;
+    private final EntityManager entityManager; // Wstrzyknięcie EntityManager
 
-    public Zakup createZakupZSaldem(Long samochodId, Long userId, Long pracownikId,
-                                    BigDecimal cenaBazowa, BigDecimal wykorzystaneSaldo) {
-        // Pobierz samochód
+    @Transactional
+    public Long createZakupZSaldem(Long samochodId, Long userId, Long pracownikId,
+                                   BigDecimal cenaBazowa, BigDecimal wykorzystaneSaldo) {
+
+        // Walidacje pozostają w Javie
         Samochod samochod = samochodService.findById(samochodId)
                 .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
 
-        // Pobierz użytkownika
         User user = userService.findById(userId)
                 .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
 
-        // Pobierz klienta
         Klient klient = user.getKlient();
         if (klient == null) {
             throw new RuntimeException("Użytkownik nie ma powiązanego klienta");
         }
 
-        // Pobierz pracownika
         Pracownik pracownik = pracownikService.findById(pracownikId)
                 .orElseThrow(() -> new RuntimeException("Pracownik nie znaleziony"));
 
@@ -57,40 +60,43 @@ public class ZakupService {
             }
         }
 
-        // Oblicz cenę końcową (trigger w bazie również to zrobi, ale potrzebujemy w Javie)
-        BigDecimal cenaKoncowa = cenaBazowa.subtract(faktycznieWykorzystane);
+        // UŻYCIE PROCEDURY Z BAZY DANYCH przez EntityManager
+        try {
+            StoredProcedureQuery query = entityManager
+                    .createStoredProcedureQuery("public.dodaj_zakup");
 
-        // Pobierz aktualny procent premii klienta
-        BigDecimal procentPremii = klient.getProcentPremii();
+            // Rejestracja parametrów w odpowiedniej kolejności
+            query.registerStoredProcedureParameter(1, Long.class, ParameterMode.OUT); // p_nowy_id_zakupu
+            query.registerStoredProcedureParameter(2, Long.class, ParameterMode.IN);  // p_id_samochodu
+            query.registerStoredProcedureParameter(3, Long.class, ParameterMode.IN);  // p_id_klienta
+            query.registerStoredProcedureParameter(4, Long.class, ParameterMode.IN);  // p_id_pracownika
+            query.registerStoredProcedureParameter(5, BigDecimal.class, ParameterMode.IN); // p_cena_bazowa
+            query.registerStoredProcedureParameter(6, BigDecimal.class, ParameterMode.IN); // p_wykorzystane_saldo
 
-        // Oblicz premię od tego zakupu (procent od ceny bazowej)
-        // UWAGA: Trigger w bazie również to obliczy i zapisze!
-        BigDecimal naliczonaPremia = BigDecimal.ZERO;
-        if (procentPremii != null && procentPremii.compareTo(BigDecimal.ZERO) > 0) {
-            naliczonaPremia = cenaBazowa.multiply(procentPremii)
-                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+            // Ustawienie parametrów IN
+            query.setParameter(2, samochodId);
+            query.setParameter(3, klient.getId());
+            query.setParameter(4, pracownikId);
+            query.setParameter(5, cenaBazowa);
+            query.setParameter(6, faktycznieWykorzystane);
+
+            // Wykonanie procedury
+            query.execute();
+
+            // Pobranie wartości OUT
+            Long noweIdZakupu = (Long) query.getOutputParameterValue(1);
+
+            // Zmiana statusu samochodu
+            samochod.setStatus("SPRZEDANY");
+            samochod.setZarezerwowanyPrzez(null);
+            samochod.setDataRezerwacji(null);
+            samochodService.save(samochod);
+
+            return noweIdZakupu;
+
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas tworzenia zakupu przez procedurę: " + e.getMessage(), e);
         }
-
-        // Utwórz nowy zakup
-        Zakup zakup = Zakup.builder()
-                .samochod(samochod)
-                .klient(klient)
-                .pracownik(pracownik)
-                .dataZakupu(LocalDate.now())
-                .cenaBazowa(cenaBazowa)
-                .cenaZakupu(cenaKoncowa)
-                .zastosowanyRabat(procentPremii)
-                .naliczonaPremia(naliczonaPremia)
-                .wykorzystaneSaldo(faktycznieWykorzystane)
-                .build();
-
-        // NIE aktualizujemy ręcznie salda klienta - robi to trigger!
-        // Trigger w bazie:
-        // 1. Doda naliczoną premię do saldo_premii
-        // 2. Odejmie wykorzystane_saldo
-        // 3. Zaktualizuje procent_premii na następny zakup
-
-        return zakupRepository.save(zakup); // Trigger zadziała przy zapisie!
     }
 
     // ==================== METODY ODCZYTU ====================
@@ -128,26 +134,28 @@ public class ZakupService {
 
     // ==================== METODY USUWANIA ====================
 
+    @Transactional
     public void remove(Long id) {
-        Zakup zakup = zakupRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
-        zakupRepository.delete(zakup);
+        try {
+            zakupRepository.deleteById(id); // Standardowe usunięcie (trigger zadziała)
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas usuwania zakupu: " + e.getMessage(), e);
+        }
     }
 
+    @Transactional
     public void delete(Long id) {
-        zakupRepository.deleteById(id);
+        remove(id); // Alias dla remove
     }
 
     // ==================== METODY POMOCNICZE ====================
 
-    // Metoda do pobierania salda klienta (do wyświetlania w UI)
     public BigDecimal pobierzSaldoKlienta(Long klientId) {
         Klient klient = klientRepository.findById(klientId)
                 .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
         return klient.getSaldoPremii();
     }
 
-    // Nowa metoda: Sprawdź czy klient może wykorzystać saldo
     public boolean czyMozeWykorzystacSaldo(Long klientId, BigDecimal kwota) {
         if (kwota == null || kwota.compareTo(BigDecimal.ZERO) <= 0) {
             return false;
@@ -181,42 +189,13 @@ public class ZakupService {
         return zakupy.size();
     }
 
-    public BigDecimal getSredniaWartoscZakupuKlienta(Long klientId) {
-        List<Zakup> zakupy = findByKlientId(klientId);
-        if (zakupy.isEmpty()) {
-            return BigDecimal.ZERO;
-        }
-
-        BigDecimal suma = getSumaWydatkowKlienta(klientId);
-        return suma.divide(BigDecimal.valueOf(zakupy.size()), 2, RoundingMode.HALF_UP);
-    }
-
     // ==================== METODY WALIDACYJNE ====================
 
     public boolean isSamochodKupiony(Long samochodId) {
-        // Sprawdź czy istnieje zakup dla tego samochodu
         return zakupRepository.existsBySamochodId(samochodId);
     }
 
     public boolean isSamochodKupionyPrzezKlienta(Long samochodId, Long klientId) {
         return zakupRepository.existsBySamochodIdAndKlientId(samochodId, klientId);
-    }
-
-    // ==================== METODY RAPORTOWE ====================
-
-    public List<Object[]> getStatystykiMiesieczne(int rok) {
-        return zakupRepository.findMonthlyStatistics(rok);
-    }
-
-    public List<Object[]> getStatystykiRoczne() {
-        return zakupRepository.findYearlyStatistics();
-    }
-
-    public List<Object[]> getTopKlienci(int limit) {
-        return zakupRepository.findTopKlienci(limit);
-    }
-
-    public List<Object[]> getTopPracownicy(int limit) {
-        return zakupRepository.findTopPracownicy(limit);
     }
 }

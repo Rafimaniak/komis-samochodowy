@@ -1,661 +1,10 @@
 Eksport wybranych plik�w
-Wygenerowano: 12/12/2025 03:20:49
+Wygenerowano: 12/15/2025 10:31:18
 
 
 
-�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\controller\ZakupController.java
-----------------------------------------------------------------------------------------------------------------------
-package pl.komis.controller;
-
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
-import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.mvc.support.RedirectAttributes;
-import pl.komis.model.*;
-import pl.komis.service.*;
-import pl.komis.service.KlientService;
-
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.List;
-
-@Controller
-@RequestMapping("/zakupy")
-@RequiredArgsConstructor
-public class ZakupController {
-
-    private final ZakupService zakupService;
-    private final UserService userService;
-    private final KlientService klientService;
-    private final SamochodService samochodService; // Dodaj to!
-    private final PracownikService pracownikService; // Dodaj to!
-
-
-    @GetMapping("/rabaty")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String listaRabatow(Model model) {
-        List<Klient> klienci = klientService.findAll();
-
-        // Oblicz statystyki
-        BigDecimal totalSaldo = klienci.stream()
-                .map(k -> k.getSaldoPremii() != null ? k.getSaldoPremii() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal totalWydane = klienci.stream()
-                .map(k -> k.getTotalWydane() != null ? k.getTotalWydane() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        long klienciZPremia = klienci.stream()
-                .filter(k -> k.getProcentPremii() != null && k.getProcentPremii().compareTo(BigDecimal.ZERO) > 0)
-                .count();
-
-        model.addAttribute("klienci", klienci);
-        model.addAttribute("totalSaldo", totalSaldo);
-        model.addAttribute("totalWydane", totalWydane);
-        model.addAttribute("klienciZPremia", klienciZPremia);
-        model.addAttribute("tytul", "System premii i rabatów");
-        return "zakupy/rabaty";
-    }
-
-    // Dla admina: pełna lista zakupów
-    @GetMapping
-    @PreAuthorize("hasRole('ADMIN')")
-    public String listZakupy(Model model) {
-        List<Zakup> zakupy = zakupService.findAll();
-        System.out.println("DEBUG: Pobrano " + zakupy.size() + " zakupów");
-        model.addAttribute("zakupy", zakupy);
-        model.addAttribute("tytul", "Lista Wszystkich Zakupów");
-        return "zakupy/lista-admin";
-    }
-
-    // W metodzie wykorzystajSaldoForm w ZakupController.java już masz:
-    @GetMapping("/wykorzystaj-saldo")
-    @PreAuthorize("isAuthenticated()")
-    public String wykorzystajSaldoForm(@RequestParam Long samochodId,
-                                       @RequestParam BigDecimal cena,
-                                       Authentication authentication,
-                                       Model model) {
-        String username = authentication.getName();
-
-        User user = userService.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
-
-        if (user.getKlient() == null) {
-            throw new RuntimeException("Nie masz powiązanego klienta");
-        }
-
-        Klient klient = klientService.findById(user.getKlient().getId())
-                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
-
-        // Pobierz samochód
-        Samochod samochod = samochodService.findById(samochodId)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-
-        // SPRAWDŹ CZY SAMOCHÓD JEST ZAREZERWOWANY
-        if ("ZAREZERWOWANY".equals(samochod.getStatus())) {
-            if (samochod.getZarezerwowanyPrzez() == null) {
-                throw new RuntimeException("Samochód jest zarezerwowany, ale brak informacji o kliencie");
-            } else if (!samochod.getZarezerwowanyPrzez().getId().equals(klient.getId())) {
-                throw new RuntimeException("Ten samochód jest zarezerwowany przez innego klienta. " +
-                        "Tylko osoba rezerwująca może go kupić.");
-            }
-        }
-
-        // Sprawdź czy samochód jest dostępny
-        if (!"DOSTEPNY".equals(samochod.getStatus()) && !"ZAREZERWOWANY".equals(samochod.getStatus())) {
-            throw new RuntimeException("Samochód nie jest dostępny do zakupu. Status: " + samochod.getStatus());
-        }
-
-        // Reszta metody pozostaje bez zmian...
-        model.addAttribute("samochodId", samochodId);
-        model.addAttribute("cenaBazowa", cena);
-        model.addAttribute("klient", klient);
-        model.addAttribute("saldoKlienta", klient.getSaldoPremii());
-        model.addAttribute("maksWykorzystanie", cena.min(klient.getSaldoPremii()));
-
-        // Dodaj informację o samochodzie do modelu
-        model.addAttribute("samochod", samochod);
-
-        // Dodaj info o premii
-        model.addAttribute("procentPremii", klient.getProcentPremii());
-        if (klient.getProcentPremii().compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal premia = cena.multiply(klient.getProcentPremii())
-                    .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-            model.addAttribute("premiaOdZakupu", premia);
-        }
-
-        // Dodaj listę pracowników
-        List<Pracownik> pracownicy = pracownikService.findAll();
-        model.addAttribute("pracownicy", pracownicy);
-
-        return "zakupy/wykorzystaj-saldo";
-    }
-    // POST - wykonanie zakupu z saldem
-    @PostMapping("/wykorzystaj-saldo")
-    @PreAuthorize("isAuthenticated()")
-    public String wykonajZakupZSaldem(@RequestParam Long samochodId,
-                                      @RequestParam BigDecimal cenaBazowa,
-                                      @RequestParam(required = false) BigDecimal wykorzystaneSaldo,
-                                      @RequestParam Long pracownikId,
-                                      Authentication authentication,
-                                      RedirectAttributes redirectAttributes) {  // DODANO RedirectAttributes
-
-        try {
-            String username = authentication.getName();
-            User user = userService.findByUsername(username)
-                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
-
-            Klient klient = user.getKlient();
-            if (klient == null) {
-                throw new RuntimeException("Nie masz powiązanego klienta");
-            }
-
-            // Pobierz samochód
-            Samochod samochod = samochodService.findById(samochodId)
-                    .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-
-            // Sprawdź dostępność samochodu
-            if (!samochod.getStatus().equals("DOSTEPNY") &&
-                    !samochod.getStatus().equals("ZAREZERWOWANY")) {
-                throw new RuntimeException("Samochód nie jest dostępny do zakupu. Status: " + samochod.getStatus());
-            }
-
-            // Jeśli klient zarezerwował ten samochód, to tylko on może go kupić
-            if (samochod.getStatus().equals("ZAREZERWOWANY") &&
-                    (samochod.getZarezerwowanyPrzez() == null ||
-                            !samochod.getZarezerwowanyPrzez().getId().equals(klient.getId()))) {
-                throw new RuntimeException("Ten samochód jest zarezerwowany przez innego klienta. " +
-                        "Tylko osoba rezerwująca może go kupić.");
-            }
-
-            // Pobierz pracownika
-            Pracownik pracownik = pracownikService.findById(pracownikId)
-                    .orElseThrow(() -> new RuntimeException("Pracownik nie znaleziony"));
-
-            // Obsłuż wykorzystanie salda (jeśli podano)
-            BigDecimal faktycznieWykorzystaneSaldo = BigDecimal.ZERO;
-            if (wykorzystaneSaldo != null && wykorzystaneSaldo.compareTo(BigDecimal.ZERO) > 0) {
-                // Sprawdź czy klient ma wystarczające saldo
-                if (klient.getSaldoPremii().compareTo(wykorzystaneSaldo) < 0) {
-                    throw new RuntimeException("Niewystarczające saldo premii");
-                }
-                faktycznieWykorzystaneSaldo = wykorzystaneSaldo.min(cenaBazowa);
-            }
-
-            // Oblicz naliczoną premię
-            BigDecimal naliczonaPremia = BigDecimal.ZERO;
-            if (klient.getProcentPremii() != null &&
-                    klient.getProcentPremii().compareTo(BigDecimal.ZERO) > 0) {
-                naliczonaPremia = cenaBazowa
-                        .multiply(klient.getProcentPremii())
-                        .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-            }
-
-            // Oblicz końcową cenę zakupu
-            BigDecimal cenaZakupu = cenaBazowa.subtract(faktycznieWykorzystaneSaldo);
-
-            // Utwórz zakup
-            Zakup zakup = new Zakup();
-            zakup.setSamochod(samochod);
-            zakup.setKlient(klient);
-            zakup.setPracownik(pracownik);
-            zakup.setCenaBazowa(cenaBazowa);
-            zakup.setWykorzystaneSaldo(faktycznieWykorzystaneSaldo);
-            zakup.setNaliczonaPremia(naliczonaPremia);
-            zakup.setCenaZakupu(cenaZakupu);
-            zakup.setDataZakupu(LocalDate.from(LocalDateTime.now()));
-            zakup.setZastosowanyRabat(klient.getProcentPremii());
-
-            // Zapisz zakup
-            zakupService.save(zakup);
-
-            // ZMIANA STATUSU SAMOCHODU NA SPRZEDANY
-            samochod.setStatus("SPRZEDANY");
-            samochod.setZarezerwowanyPrzez(null); // Wyczyść rezerwację po zakupie
-            samochod.setDataRezerwacji(null);
-            samochodService.save(samochod);
-
-            // Aktualizuj dane klienta (liczba zakupów, wydane kwoty)
-            klient.setLiczbaZakupow(klient.getLiczbaZakupow() + 1);
-            klient.setTotalWydane(klient.getTotalWydane().add(cenaZakupu));
-
-            // Dodaj premię do salda klienta
-            klient.setSaldoPremii(klient.getSaldoPremii().add(naliczonaPremia));
-
-            // Odejmij wykorzystane saldo
-            klient.setSaldoPremii(klient.getSaldoPremii().subtract(faktycznieWykorzystaneSaldo));
-
-            // Aktualizuj procent premii na podstawie liczby zakupów
-            if (klient.getLiczbaZakupow() >= 5) {
-                klient.setProcentPremii(new BigDecimal("15"));
-            } else if (klient.getLiczbaZakupow() >= 3) {
-                klient.setProcentPremii(new BigDecimal("10"));
-            } else if (klient.getLiczbaZakupow() >= 2) {
-                klient.setProcentPremii(new BigDecimal("5"));
-            } else {
-                klient.setProcentPremii(BigDecimal.ZERO);
-            }
-
-            klientService.save(klient);
-
-            // Przygotuj komunikat sukcesu
-            String message;
-            if (faktycznieWykorzystaneSaldo.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal zaoszczedzone = faktycznieWykorzystaneSaldo;
-                message = String.format(
-                        "Samochód kupiony z wykorzystaniem salda!<br>" +
-                                "Wykorzystano saldo: <strong>%.2f zł</strong><br>" +
-                                "Na Twoje saldo dodano: <strong>%.2f zł</strong> premii<br>" +
-                                "Nowe saldo: <strong>%.2f zł</strong>",
-                        zaoszczedzone, naliczonaPremia, klient.getSaldoPremii()
-                );
-            } else {
-                message = String.format(
-                        "Samochód kupiony pomyślnie!<br>" +
-                                "Na Twoje saldo dodano: <strong>%.2f zł</strong> premii",
-                        naliczonaPremia
-                );
-            }
-
-            redirectAttributes.addFlashAttribute("successMessage", message);
-
-            return "redirect:/zakupy/moje";
-
-        } catch (Exception e) {
-            System.err.println("Błąd podczas zakupu z wykorzystaniem salda: " + e.getMessage());
-            e.printStackTrace();
-
-            // Przekieruj z błędem
-            redirectAttributes.addFlashAttribute("errorMessage",
-                    "Błąd podczas zakupu: " + e.getMessage());
-            return "redirect:/samochody/szczegoly?id=" + samochodId;
-        }
-    }
-
-    // Dla użytkownika: tylko jego zakupy - ZMIENIONE: teraz przekazujemy obiekt Klient
-    @GetMapping("/moje")
-    @PreAuthorize("isAuthenticated()")
-    public String mojeZakupy(Authentication authentication, Model model) {
-        String username = authentication.getName();
-
-        try {
-            User user = userService.findByUsername(username)
-                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
-
-            List<Zakup> zakupy = List.of();
-            Klient klient = null;
-
-            // Użyj metody ensureUserHasKlient zamiast ręcznego tworzenia
-            klient = userService.ensureUserHasKlient(user.getId());
-
-            // Pobierz zakupy klienta
-            Long klientId = klient.getId();
-            zakupy = zakupService.findByKlientId(klientId);
-
-            // OBLICZ SUMY DLA STATYSTYK
-            BigDecimal sumaCenaBazowa = zakupy.stream()
-                    .map(z -> z.getCenaBazowa() != null ? z.getCenaBazowa() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            BigDecimal sumaWykorzystaneSaldo = zakupy.stream()
-                    .map(z -> z.getWykorzystaneSaldo() != null ? z.getWykorzystaneSaldo() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            BigDecimal sumaNaliczonaPremia = zakupy.stream()
-                    .map(z -> z.getNaliczonaPremia() != null ? z.getNaliczonaPremia() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            BigDecimal sumaCenaZakupu = zakupy.stream()
-                    .map(z -> z.getCenaZakupu() != null ? z.getCenaZakupu() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            // Dodaj do modelu
-            model.addAttribute("sumaCenaBazowa", sumaCenaBazowa);
-            model.addAttribute("sumaWykorzystaneSaldo", sumaWykorzystaneSaldo);
-            model.addAttribute("sumaNaliczonaPremia", sumaNaliczonaPremia);
-            model.addAttribute("sumaCenaZakupu", sumaCenaZakupu);
-
-            System.out.println("DEBUG: Klient ID: " + klientId);
-            System.out.println("DEBUG: Procent premii: " + klient.getProcentPremii() + "%");
-            System.out.println("DEBUG: Saldo premii: " + klient.getSaldoPremii() + " zł");
-            System.out.println("DEBUG: Łącznie wydano: " + klient.getTotalWydane() + " zł");
-            System.out.println("DEBUG: Liczba zakupów: " + klient.getLiczbaZakupow());
-
-            model.addAttribute("zakupy", zakupy);
-            model.addAttribute("klient", klient);
-            model.addAttribute("tytul", "Moje Zakupy");
-            model.addAttribute("username", username);
-            return "zakupy/lista-klient";
-
-        } catch (Exception e) {
-            System.err.println("BŁĄD w mojeZakupy: " + e.getMessage());
-            e.printStackTrace();
-            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupów: " + e.getMessage());
-            return "error";
-        }
-    }
-    // GET - szczegóły zakupów klienta (dla admina)
-    @GetMapping("/moje/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String zakupyKlienta(@PathVariable Long id, Model model) {
-        try {
-            // Znajdź klienta
-            Klient klient = klientService.findById(id)
-                    .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
-
-            // Pobierz zakupy klienta
-            List<Zakup> zakupy = zakupService.findByKlientId(id);
-
-            // Oblicz statystyki
-            BigDecimal sumaCenaBazowa = zakupy.stream()
-                    .map(z -> z.getCenaBazowa() != null ? z.getCenaBazowa() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            BigDecimal sumaWykorzystaneSaldo = zakupy.stream()
-                    .map(z -> z.getWykorzystaneSaldo() != null ? z.getWykorzystaneSaldo() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            BigDecimal sumaNaliczonaPremia = zakupy.stream()
-                    .map(z -> z.getNaliczonaPremia() != null ? z.getNaliczonaPremia() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            BigDecimal sumaCenaZakupu = zakupy.stream()
-                    .map(z -> z.getCenaZakupu() != null ? z.getCenaZakupu() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            // Dodaj do modelu
-            model.addAttribute("zakupy", zakupy);
-            model.addAttribute("klient", klient);
-            model.addAttribute("sumaCenaBazowa", sumaCenaBazowa);
-            model.addAttribute("sumaWykorzystaneSaldo", sumaWykorzystaneSaldo);
-            model.addAttribute("sumaNaliczonaPremia", sumaNaliczonaPremia);
-            model.addAttribute("sumaCenaZakupu", sumaCenaZakupu);
-            model.addAttribute("tytul", "Zakupy klienta: " + klient.getImie() + " " + klient.getNazwisko());
-
-            return "zakupy/lista-klient";
-
-        } catch (Exception e) {
-            System.err.println("BŁĄD w zakupyKlienta: " + e.getMessage());
-            e.printStackTrace();
-            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupów: " + e.getMessage());
-            return "error";
-        }
-    }
-
-    // GET - szczegóły konkretnego zakupu (dla admina)
-    @GetMapping("/szczegoly/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String szczegolyZakupu(@PathVariable Long id, Model model) {
-        try {
-            Zakup zakup = zakupService.findById(id)
-                    .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
-
-            model.addAttribute("zakup", zakup);
-            model.addAttribute("tytul", "Szczegóły zakupu #" + zakup.getId());
-
-            return "zakupy/szczegoly";
-        } catch (Exception e) {
-            System.err.println("BŁĄD w szczegolyZakupu: " + e.getMessage());
-            e.printStackTrace();
-            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupu: " + e.getMessage());
-            return "error";
-        }
-
-    }
-
-
-    // Pomocnicza metoda do znajdowania zakupów po emailu klienta
-    private List<Zakup> findZakupyByUserEmail(String email) {
-        // Najpierw znajdź klienta po emailu
-        return klientService.findByEmail(email)
-                .map(klient -> zakupService.findByKlientId(klient.getId()))
-                .orElse(List.of());
-    }
-
-
-    // Usuwanie tylko dla admina
-    @PostMapping("/usun/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public String deleteZakup(@PathVariable Long id) {
-        zakupService.remove(id);
-        return "redirect:/zakupy";
-    }
-}
-
-
-�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\service\ZakupService.java
-----------------------------------------------------------------------------------------------------------------
-package pl.komis.service;
-
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import pl.komis.model.*;
-import pl.komis.repository.*;
-
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.LocalDate;
-import java.util.List;
-import java.util.Optional;
-
-@Service
-@RequiredArgsConstructor
-public class ZakupService {
-
-    private final ZakupRepository zakupRepository;
-    private final KlientRepository klientRepository;
-    private final SamochodService samochodService;
-    private final PracownikService pracownikService;
-    private final UserService userService;
-
-    public Zakup createZakupZSaldem(Long samochodId, Long userId, Long pracownikId,
-                                    BigDecimal cenaBazowa, BigDecimal wykorzystaneSaldo) {
-        // Pobierz samochód
-        Samochod samochod = samochodService.findById(samochodId)
-                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
-
-        // Pobierz użytkownika
-        User user = userService.findById(userId)
-                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
-
-        // Pobierz klienta
-        Klient klient = user.getKlient();
-        if (klient == null) {
-            throw new RuntimeException("Użytkownik nie ma powiązanego klienta");
-        }
-
-        // Pobierz pracownika
-        Pracownik pracownik = pracownikService.findById(pracownikId)
-                .orElseThrow(() -> new RuntimeException("Pracownik nie znaleziony"));
-
-        // Walidacja: wykorzystane saldo nie może przekraczać ceny samochodu
-        if (wykorzystaneSaldo != null && wykorzystaneSaldo.compareTo(cenaBazowa) > 0) {
-            throw new RuntimeException("Wykorzystane saldo nie może przekraczać ceny samochodu");
-        }
-
-        // Walidacja: sprawdź czy klient ma wystarczające saldo
-        BigDecimal faktycznieWykorzystane = (wykorzystaneSaldo != null) ? wykorzystaneSaldo : BigDecimal.ZERO;
-        if (faktycznieWykorzystane.compareTo(BigDecimal.ZERO) > 0) {
-            if (klient.getSaldoPremii() == null ||
-                    klient.getSaldoPremii().compareTo(faktycznieWykorzystane) < 0) {
-                throw new RuntimeException("Niewystarczające saldo premii. Masz: " +
-                        klient.getSaldoPremii() + " zł, a potrzebujesz: " +
-                        faktycznieWykorzystane + " zł");
-            }
-        }
-
-        // Oblicz cenę końcową (trigger w bazie również to zrobi, ale potrzebujemy w Javie)
-        BigDecimal cenaKoncowa = cenaBazowa.subtract(faktycznieWykorzystane);
-
-        // Pobierz aktualny procent premii klienta
-        BigDecimal procentPremii = klient.getProcentPremii();
-
-        // Oblicz premię od tego zakupu (procent od ceny bazowej)
-        // UWAGA: Trigger w bazie również to obliczy i zapisze!
-        BigDecimal naliczonaPremia = BigDecimal.ZERO;
-        if (procentPremii != null && procentPremii.compareTo(BigDecimal.ZERO) > 0) {
-            naliczonaPremia = cenaBazowa.multiply(procentPremii)
-                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-        }
-
-        // Utwórz nowy zakup
-        Zakup zakup = Zakup.builder()
-                .samochod(samochod)
-                .klient(klient)
-                .pracownik(pracownik)
-                .dataZakupu(LocalDate.now())
-                .cenaBazowa(cenaBazowa)
-                .cenaZakupu(cenaKoncowa)
-                .zastosowanyRabat(procentPremii)
-                .naliczonaPremia(naliczonaPremia)
-                .wykorzystaneSaldo(faktycznieWykorzystane)
-                .build();
-
-        // NIE aktualizujemy ręcznie salda klienta - robi to trigger!
-        // Trigger w bazie:
-        // 1. Doda naliczoną premię do saldo_premii
-        // 2. Odejmie wykorzystane_saldo
-        // 3. Zaktualizuje procent_premii na następny zakup
-
-        return zakupRepository.save(zakup); // Trigger zadziała przy zapisie!
-    }
-
-    // ==================== METODY ODCZYTU ====================
-
-    public List<Zakup> findAll() {
-        return zakupRepository.findAll();
-    }
-
-    public Optional<Zakup> findById(Long id) {
-        return zakupRepository.findById(id);
-    }
-
-    public Zakup getById(Long id) {
-        return zakupRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
-    }
-
-    public List<Zakup> findByKlientId(Long id) {
-        return zakupRepository.findByKlientId(id);
-    }
-
-    public List<Zakup> findByPracownikId(Long id) {
-        return zakupRepository.findByPracownikId(id);
-    }
-
-    public List<Zakup> findByDateRange(LocalDate od, LocalDate do_) {
-        return zakupRepository.findByDataZakupuBetween(od, do_);
-    }
-
-    // ==================== METODY ZAPISU ====================
-
-    public Zakup save(Zakup zakup) {
-        return zakupRepository.save(zakup);
-    }
-
-    // ==================== METODY USUWANIA ====================
-
-    public void remove(Long id) {
-        Zakup zakup = zakupRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
-        zakupRepository.delete(zakup);
-    }
-
-    public void delete(Long id) {
-        zakupRepository.deleteById(id);
-    }
-
-    // ==================== METODY POMOCNICZE ====================
-
-    // Metoda do pobierania salda klienta (do wyświetlania w UI)
-    public BigDecimal pobierzSaldoKlienta(Long klientId) {
-        Klient klient = klientRepository.findById(klientId)
-                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
-        return klient.getSaldoPremii();
-    }
-
-    // Nowa metoda: Sprawdź czy klient może wykorzystać saldo
-    public boolean czyMozeWykorzystacSaldo(Long klientId, BigDecimal kwota) {
-        if (kwota == null || kwota.compareTo(BigDecimal.ZERO) <= 0) {
-            return false;
-        }
-
-        Klient klient = klientRepository.findById(klientId)
-                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
-
-        return klient.getSaldoPremii() != null &&
-                klient.getSaldoPremii().compareTo(kwota) >= 0;
-    }
-
-    // ==================== METODY STATYSTYCZNE ====================
-
-    public BigDecimal getSumaWydatkowKlienta(Long klientId) {
-        List<Zakup> zakupy = findByKlientId(klientId);
-        return zakupy.stream()
-                .map(Zakup::getCenaZakupu)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    public BigDecimal getSumaWykorzystanegoSaldaKlienta(Long klientId) {
-        List<Zakup> zakupy = findByKlientId(klientId);
-        return zakupy.stream()
-                .map(Zakup::getWykorzystaneSaldo)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    public int getLiczbaZakupowKlienta(Long klientId) {
-        List<Zakup> zakupy = findByKlientId(klientId);
-        return zakupy.size();
-    }
-
-    public BigDecimal getSredniaWartoscZakupuKlienta(Long klientId) {
-        List<Zakup> zakupy = findByKlientId(klientId);
-        if (zakupy.isEmpty()) {
-            return BigDecimal.ZERO;
-        }
-
-        BigDecimal suma = getSumaWydatkowKlienta(klientId);
-        return suma.divide(BigDecimal.valueOf(zakupy.size()), 2, RoundingMode.HALF_UP);
-    }
-
-    // ==================== METODY WALIDACYJNE ====================
-
-    public boolean isSamochodKupiony(Long samochodId) {
-        // Sprawdź czy istnieje zakup dla tego samochodu
-        return zakupRepository.existsBySamochodId(samochodId);
-    }
-
-    public boolean isSamochodKupionyPrzezKlienta(Long samochodId, Long klientId) {
-        return zakupRepository.existsBySamochodIdAndKlientId(samochodId, klientId);
-    }
-
-    // ==================== METODY RAPORTOWE ====================
-
-    public List<Object[]> getStatystykiMiesieczne(int rok) {
-        return zakupRepository.findMonthlyStatistics(rok);
-    }
-
-    public List<Object[]> getStatystykiRoczne() {
-        return zakupRepository.findYearlyStatistics();
-    }
-
-    public List<Object[]> getTopKlienci(int limit) {
-        return zakupRepository.findTopKlienci(limit);
-    }
-
-    public List<Object[]> getTopPracownicy(int limit) {
-        return zakupRepository.findTopPracownicy(limit);
-    }
-}
-
-
-�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\model\Zakup.java
--------------------------------------------------------------------------------------------------------
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\model\Zakup.java
+--------------------------------------------------------------------------------------------------------------------------
 package pl.komis.model;
 
 import jakarta.persistence.*;
@@ -726,8 +75,751 @@ public class Zakup {
 }
 
 
-�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\service\KlientService.java
------------------------------------------------------------------------------------------------------------------
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\model\Klient.java
+---------------------------------------------------------------------------------------------------------------------------
+package pl.komis.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import org.hibernate.annotations.DynamicUpdate;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+@Entity
+@Table(name = "klient")
+@DynamicUpdate
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Klient {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String imie;
+    private String nazwisko;
+    private String email;
+    private String telefon;
+
+    @OneToMany(mappedBy = "klient", cascade = CascadeType.ALL)
+    private List<Zakup> zakupy;
+
+    @Column(name = "liczba_zakupow")
+    private Integer liczbaZakupow = 0;
+
+    @Column(name = "procent_premii", precision = 5, scale = 2)
+    private BigDecimal procentPremii = BigDecimal.ZERO;
+
+    @Column(name = "saldo_premii", precision = 12, scale = 2)
+    private BigDecimal saldoPremii = BigDecimal.ZERO;
+
+    @Column(name = "total_wydane", precision = 12, scale = 2)
+    private BigDecimal totalWydane = BigDecimal.ZERO;
+
+    // Metoda pomocnicza - czy klient może wykorzystać saldo?
+    public boolean mozeWykorzystacSaldo(BigDecimal kwota) {
+        return saldoPremii != null && saldoPremii.compareTo(kwota) >= 0;
+    }
+
+    // Metoda pomocnicza - użyj salda
+    public void uzyjSalda(BigDecimal kwota) {
+        if (mozeWykorzystacSaldo(kwota)) {
+            saldoPremii = saldoPremii.subtract(kwota);
+        }
+    }
+}
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\repository\ZakupRepository.java
+-----------------------------------------------------------------------------------------------------------------------------------------
+package pl.komis.repository;
+
+import pl.komis.model.Zakup;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.query.Procedure;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
+@Repository
+public interface ZakupRepository extends JpaRepository<Zakup, Long> {
+
+    List<Zakup> findByKlientId(Long klientId);
+    List<Zakup> findByPracownikId(Long pracownikId);
+    List<Zakup> findByDataZakupuBetween(LocalDate startDate, LocalDate endDate);
+    boolean existsBySamochodId(Long samochodId);
+    boolean existsBySamochodIdAndKlientId(Long samochodId, Long klientId);
+
+    // Nowe metody wykorzystujące procedury/funkcje z bazy
+    @Transactional
+    @Procedure(name = "dodaj_zakup")
+    Long dodajZakupZProcedury(
+            @Param("p_nowy_id_zakupu") Long nowyIdZakupu,  // OUT parameter musi być pierwszy
+            @Param("p_id_samochodu") Long samochodId,
+            @Param("p_id_klienta") Long klientId,
+            @Param("p_id_pracownika") Long pracownikId,
+            @Param("p_cena_bazowa") BigDecimal cenaBazowa,
+            @Param("p_wykorzystane_saldo") BigDecimal wykorzystaneSaldo
+    );
+
+    @Transactional
+    @Modifying
+    @Query(value = "CALL usun_zakup(:idZakupu)", nativeQuery = true)
+    void usunZakupZProcedury(@Param("idZakupu") Long idZakupu);
+
+    @Query(value = "SELECT * FROM znajdz_zakupy_klienta(:idKlienta)", nativeQuery = true)
+    List<Object[]> znajdzZakupyKlientaZProcedury(@Param("idKlienta") Long idKlienta);
+}
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\service\ZakupService.java
+-----------------------------------------------------------------------------------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import pl.komis.model.*;
+import pl.komis.repository.*;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.ParameterMode;
+import jakarta.persistence.StoredProcedureQuery;
+import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class ZakupService {
+
+    private final ZakupRepository zakupRepository;
+    private final KlientRepository klientRepository;
+    private final SamochodService samochodService;
+    private final PracownikService pracownikService;
+    private final UserService userService;
+    private final EntityManager entityManager; // Wstrzyknięcie EntityManager
+
+    @Transactional
+    public Long createZakupZSaldem(Long samochodId, Long userId, Long pracownikId,
+                                   BigDecimal cenaBazowa, BigDecimal wykorzystaneSaldo) {
+
+        // Walidacje pozostają w Javie
+        Samochod samochod = samochodService.findById(samochodId)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+        User user = userService.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        Klient klient = user.getKlient();
+        if (klient == null) {
+            throw new RuntimeException("Użytkownik nie ma powiązanego klienta");
+        }
+
+        Pracownik pracownik = pracownikService.findById(pracownikId)
+                .orElseThrow(() -> new RuntimeException("Pracownik nie znaleziony"));
+
+        // Walidacja: wykorzystane saldo nie może przekraczać ceny samochodu
+        if (wykorzystaneSaldo != null && wykorzystaneSaldo.compareTo(cenaBazowa) > 0) {
+            throw new RuntimeException("Wykorzystane saldo nie może przekraczać ceny samochodu");
+        }
+
+        // Walidacja: sprawdź czy klient ma wystarczające saldo
+        BigDecimal faktycznieWykorzystane = (wykorzystaneSaldo != null) ? wykorzystaneSaldo : BigDecimal.ZERO;
+        if (faktycznieWykorzystane.compareTo(BigDecimal.ZERO) > 0) {
+            if (klient.getSaldoPremii() == null ||
+                    klient.getSaldoPremii().compareTo(faktycznieWykorzystane) < 0) {
+                throw new RuntimeException("Niewystarczające saldo premii. Masz: " +
+                        klient.getSaldoPremii() + " zł, a potrzebujesz: " +
+                        faktycznieWykorzystane + " zł");
+            }
+        }
+
+        // UŻYCIE PROCEDURY Z BAZY DANYCH przez EntityManager
+        try {
+            StoredProcedureQuery query = entityManager
+                    .createStoredProcedureQuery("public.dodaj_zakup");
+
+            // Rejestracja parametrów w odpowiedniej kolejności
+            query.registerStoredProcedureParameter(1, Long.class, ParameterMode.OUT); // p_nowy_id_zakupu
+            query.registerStoredProcedureParameter(2, Long.class, ParameterMode.IN);  // p_id_samochodu
+            query.registerStoredProcedureParameter(3, Long.class, ParameterMode.IN);  // p_id_klienta
+            query.registerStoredProcedureParameter(4, Long.class, ParameterMode.IN);  // p_id_pracownika
+            query.registerStoredProcedureParameter(5, BigDecimal.class, ParameterMode.IN); // p_cena_bazowa
+            query.registerStoredProcedureParameter(6, BigDecimal.class, ParameterMode.IN); // p_wykorzystane_saldo
+
+            // Ustawienie parametrów IN
+            query.setParameter(2, samochodId);
+            query.setParameter(3, klient.getId());
+            query.setParameter(4, pracownikId);
+            query.setParameter(5, cenaBazowa);
+            query.setParameter(6, faktycznieWykorzystane);
+
+            // Wykonanie procedury
+            query.execute();
+
+            // Pobranie wartości OUT
+            Long noweIdZakupu = (Long) query.getOutputParameterValue(1);
+
+            // Zmiana statusu samochodu
+            samochod.setStatus("SPRZEDANY");
+            samochod.setZarezerwowanyPrzez(null);
+            samochod.setDataRezerwacji(null);
+            samochodService.save(samochod);
+
+            return noweIdZakupu;
+
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas tworzenia zakupu przez procedurę: " + e.getMessage(), e);
+        }
+    }
+
+    // ==================== METODY ODCZYTU ====================
+
+    public List<Zakup> findAll() {
+        return zakupRepository.findAll();
+    }
+
+    public Optional<Zakup> findById(Long id) {
+        return zakupRepository.findById(id);
+    }
+
+    public Zakup getById(Long id) {
+        return zakupRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
+    }
+
+    public List<Zakup> findByKlientId(Long id) {
+        return zakupRepository.findByKlientId(id);
+    }
+
+    public List<Zakup> findByPracownikId(Long id) {
+        return zakupRepository.findByPracownikId(id);
+    }
+
+    public List<Zakup> findByDateRange(LocalDate od, LocalDate do_) {
+        return zakupRepository.findByDataZakupuBetween(od, do_);
+    }
+
+    // ==================== METODY ZAPISU ====================
+
+    public Zakup save(Zakup zakup) {
+        return zakupRepository.save(zakup);
+    }
+
+    // ==================== METODY USUWANIA ====================
+
+    @Transactional
+    public void remove(Long id) {
+        try {
+            zakupRepository.deleteById(id); // Standardowe usunięcie (trigger zadziała)
+        } catch (Exception e) {
+            throw new RuntimeException("Błąd podczas usuwania zakupu: " + e.getMessage(), e);
+        }
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        remove(id); // Alias dla remove
+    }
+
+    // ==================== METODY POMOCNICZE ====================
+
+    public BigDecimal pobierzSaldoKlienta(Long klientId) {
+        Klient klient = klientRepository.findById(klientId)
+                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
+        return klient.getSaldoPremii();
+    }
+
+    public boolean czyMozeWykorzystacSaldo(Long klientId, BigDecimal kwota) {
+        if (kwota == null || kwota.compareTo(BigDecimal.ZERO) <= 0) {
+            return false;
+        }
+
+        Klient klient = klientRepository.findById(klientId)
+                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
+
+        return klient.getSaldoPremii() != null &&
+                klient.getSaldoPremii().compareTo(kwota) >= 0;
+    }
+
+    // ==================== METODY STATYSTYCZNE ====================
+
+    public BigDecimal getSumaWydatkowKlienta(Long klientId) {
+        List<Zakup> zakupy = findByKlientId(klientId);
+        return zakupy.stream()
+                .map(Zakup::getCenaZakupu)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public BigDecimal getSumaWykorzystanegoSaldaKlienta(Long klientId) {
+        List<Zakup> zakupy = findByKlientId(klientId);
+        return zakupy.stream()
+                .map(Zakup::getWykorzystaneSaldo)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public int getLiczbaZakupowKlienta(Long klientId) {
+        List<Zakup> zakupy = findByKlientId(klientId);
+        return zakupy.size();
+    }
+
+    // ==================== METODY WALIDACYJNE ====================
+
+    public boolean isSamochodKupiony(Long samochodId) {
+        return zakupRepository.existsBySamochodId(samochodId);
+    }
+
+    public boolean isSamochodKupionyPrzezKlienta(Long samochodId, Long klientId) {
+        return zakupRepository.existsBySamochodIdAndKlientId(samochodId, klientId);
+    }
+}
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\controller\ZakupController.java
+-----------------------------------------------------------------------------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+import pl.komis.model.*;
+import pl.komis.service.*;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Controller
+@RequestMapping("/zakupy")
+@RequiredArgsConstructor
+public class ZakupController {
+
+    private final ZakupService zakupService;
+    private final UserService userService;
+    private final KlientService klientService;
+    private final SamochodService samochodService;
+    private final PracownikService pracownikService;
+
+    @GetMapping("/rabaty")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String listaRabatow(Model model) {
+        List<Klient> klienci = klientService.findAll();
+
+        // Oblicz statystyki
+        BigDecimal totalSaldo = klienci.stream()
+                .map(k -> k.getSaldoPremii() != null ? k.getSaldoPremii() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalWydane = klienci.stream()
+                .map(k -> k.getTotalWydane() != null ? k.getTotalWydane() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        long klienciZPremia = klienci.stream()
+                .filter(k -> k.getProcentPremii() != null && k.getProcentPremii().compareTo(BigDecimal.ZERO) > 0)
+                .count();
+
+        model.addAttribute("klienci", klienci);
+        model.addAttribute("totalSaldo", totalSaldo);
+        model.addAttribute("totalWydane", totalWydane);
+        model.addAttribute("klienciZPremia", klienciZPremia);
+        model.addAttribute("tytul", "System premii i rabatów");
+        return "zakupy/rabaty";
+    }
+
+    // Dla admina: pełna lista zakupów
+    @GetMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public String listZakupy(Model model) {
+        List<Zakup> zakupy = zakupService.findAll();
+        System.out.println("DEBUG: Pobrano " + zakupy.size() + " zakupów");
+        model.addAttribute("zakupy", zakupy);
+        model.addAttribute("tytul", "Lista Wszystkich Zakupów");
+        return "zakupy/lista-admin";
+    }
+
+    @GetMapping("/wykorzystaj-saldo")
+    @PreAuthorize("isAuthenticated()")
+    public String wykorzystajSaldoForm(@RequestParam Long samochodId,
+                                       @RequestParam BigDecimal cena,
+                                       Authentication authentication,
+                                       Model model) {
+        String username = authentication.getName();
+
+        User user = userService.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        if (user.getKlient() == null) {
+            throw new RuntimeException("Nie masz powiązanego klienta");
+        }
+
+        Klient klient = klientService.findById(user.getKlient().getId())
+                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
+
+        // Pobierz samochód
+        Samochod samochod = samochodService.findById(samochodId)
+                .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+        // SPRAWDŹ CZY SAMOCHÓD JEST ZAREZERWOWANY
+        if ("ZAREZERWOWANY".equals(samochod.getStatus())) {
+            if (samochod.getZarezerwowanyPrzez() == null) {
+                throw new RuntimeException("Samochód jest zarezerwowany, ale brak informacji o kliencie");
+            } else if (!samochod.getZarezerwowanyPrzez().getId().equals(klient.getId())) {
+                throw new RuntimeException("Ten samochód jest zarezerwowany przez innego klienta. " +
+                        "Tylko osoba rezerwująca może go kupić.");
+            }
+        }
+
+        // Sprawdź czy samochód jest dostępny
+        if (!"DOSTEPNY".equals(samochod.getStatus()) && !"ZAREZERWOWANY".equals(samochod.getStatus())) {
+            throw new RuntimeException("Samochód nie jest dostępny do zakupu. Status: " + samochod.getStatus());
+        }
+
+        // Reszta metody pozostaje bez zmian...
+        model.addAttribute("samochodId", samochodId);
+        model.addAttribute("cenaBazowa", cena);
+        model.addAttribute("klient", klient);
+        model.addAttribute("saldoKlienta", klient.getSaldoPremii());
+        model.addAttribute("maksWykorzystanie", cena.min(klient.getSaldoPremii()));
+
+        // Dodaj informację o samochodzie do modelu
+        model.addAttribute("samochod", samochod);
+
+        // Dodaj info o premii
+        model.addAttribute("procentPremii", klient.getProcentPremii());
+        if (klient.getProcentPremii().compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal premia = cena.multiply(klient.getProcentPremii())
+                    .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+            model.addAttribute("premiaOdZakupu", premia);
+        }
+
+        // Dodaj listę pracowników
+        List<Pracownik> pracownicy = pracownikService.findAll();
+        model.addAttribute("pracownicy", pracownicy);
+
+        return "zakupy/wykorzystaj-saldo";
+    }
+
+    // POST-wykonanie zakupu z saldem - UŻYWAMY TERAZ PROCEDURY Z BAZY
+    @PostMapping("/wykorzystaj-saldo")
+    @PreAuthorize("isAuthenticated()")
+    public String wykonajZakupZSaldem(@RequestParam Long samochodId,
+                                      @RequestParam BigDecimal cenaBazowa,
+                                      @RequestParam(required = false) BigDecimal wykorzystaneSaldo,
+                                      @RequestParam Long pracownikId,
+                                      Authentication authentication,
+                                      RedirectAttributes redirectAttributes) {
+
+        try {
+            String username = authentication.getName();
+            User user = userService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            Klient klient = user.getKlient();
+            if (klient == null) {
+                throw new RuntimeException("Nie masz powiązanego klienta");
+            }
+
+            // Pobierz samochód
+            Samochod samochod = samochodService.findById(samochodId)
+                    .orElseThrow(() -> new RuntimeException("Samochód nie znaleziony"));
+
+            // Sprawdź dostępność samochodu
+            if (!samochod.getStatus().equals("DOSTEPNY") &&
+                    !samochod.getStatus().equals("ZAREZERWOWANY")) {
+                throw new RuntimeException("Samochód nie jest dostępny do zakupu. Status: " + samochod.getStatus());
+            }
+
+            // Jeśli klient zarezerwował ten samochód, to tylko on może go kupić
+            if (samochod.getStatus().equals("ZAREZERWOWANY") &&
+                    (samochod.getZarezerwowanyPrzez() == null ||
+                            !samochod.getZarezerwowanyPrzez().getId().equals(klient.getId()))) {
+                throw new RuntimeException("Ten samochód jest zarezerwowany przez innego klienta. " +
+                        "Tylko osoba rezerwująca może go kupić.");
+            }
+
+            // Pobierz pracownika
+            Pracownik pracownik = pracownikService.findById(pracownikId)
+                    .orElseThrow(() -> new RuntimeException("Pracownik nie znaleziony"));
+
+            // Obsłuż wykorzystanie salda (jeśli podano)
+            BigDecimal faktycznieWykorzystaneSaldo = BigDecimal.ZERO;
+            if (wykorzystaneSaldo != null && wykorzystaneSaldo.compareTo(BigDecimal.ZERO) > 0) {
+                // Sprawdź czy klient ma wystarczające saldo
+                if (klient.getSaldoPremii().compareTo(wykorzystaneSaldo) < 0) {
+                    throw new RuntimeException("Niewystarczające saldo premii");
+                }
+                faktycznieWykorzystaneSaldo = wykorzystaneSaldo.min(cenaBazowa);
+            }
+
+            // UŻYCIE PROCEDURY Z BAZY DANYCH zamiast ręcznego tworzenia Zakupu
+            Long zakupId = zakupService.createZakupZSaldem(
+                    samochodId,
+                    user.getId(),
+                    pracownikId,
+                    cenaBazowa,
+                    faktycznieWykorzystaneSaldo
+            );
+
+            // Pobierz zaktualizowane dane klienta po akcji triggera
+            Klient zaktualizowanyKlient = klientService.findById(klient.getId())
+                    .orElseThrow(() -> new RuntimeException("Klient nie znaleziony po zakupie"));
+
+            // Przygotuj komunikat sukcesu z aktualnymi danymi
+            String message;
+            if (faktycznieWykorzystaneSaldo.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal zaoszczedzone = faktycznieWykorzystaneSaldo;
+                message = String.format(
+                        "Samochód kupiony z wykorzystaniem salda!<br>" +
+                                "Wykorzystano saldo: <strong>%.2f zł</strong><br>" +
+                                "Nowe saldo: <strong>%.2f zł</strong>",
+                        zaoszczedzone, zaktualizowanyKlient.getSaldoPremii()
+                );
+            } else {
+                message = String.format(
+                        "Samochód kupiony pomyślnie!<br>" +
+                                "Twoje nowe saldo premii: <strong>%.2f zł</strong>",
+                        zaktualizowanyKlient.getSaldoPremii()
+                );
+            }
+
+            redirectAttributes.addFlashAttribute("successMessage", message);
+
+            return "redirect:/zakupy/moje";
+
+        } catch (Exception e) {
+            System.err.println("Błąd podczas zakupu z wykorzystaniem salda: " + e.getMessage());
+            e.printStackTrace();
+
+            // Przekieruj z błędem
+            redirectAttributes.addFlashAttribute("errorMessage",
+                    "Błąd podczas zakupu: " + e.getMessage());
+            return "redirect:/samochody/szczegoly?id=" + samochodId;
+        }
+    }
+
+    // Dla użytkownika: tylko jego zakupy
+    @GetMapping("/moje")
+    @PreAuthorize("isAuthenticated()")
+    public String mojeZakupy(Authentication authentication, Model model) {
+        String username = authentication.getName();
+
+        try {
+            User user = userService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+            List<Zakup> zakupy = List.of();
+            Klient klient = null;
+
+            // Użyj metody ensureUserHasKlient zamiast ręcznego tworzenia
+            klient = userService.ensureUserHasKlient(user.getId());
+
+            // Pobierz zakupy klienta
+            Long klientId = klient.getId();
+            zakupy = zakupService.findByKlientId(klientId);
+
+            // OBLICZ SUMY DLA STATYSTYK
+            BigDecimal sumaCenaBazowa = zakupy.stream()
+                    .map(z -> z.getCenaBazowa() != null ? z.getCenaBazowa() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaWykorzystaneSaldo = zakupy.stream()
+                    .map(z -> z.getWykorzystaneSaldo() != null ? z.getWykorzystaneSaldo() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaNaliczonaPremia = zakupy.stream()
+                    .map(z -> z.getNaliczonaPremia() != null ? z.getNaliczonaPremia() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaCenaZakupu = zakupy.stream()
+                    .map(z -> z.getCenaZakupu() != null ? z.getCenaZakupu() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Dodaj do modelu
+            model.addAttribute("sumaCenaBazowa", sumaCenaBazowa);
+            model.addAttribute("sumaWykorzystaneSaldo", sumaWykorzystaneSaldo);
+            model.addAttribute("sumaNaliczonaPremia", sumaNaliczonaPremia);
+            model.addAttribute("sumaCenaZakupu", sumaCenaZakupu);
+
+            System.out.println("DEBUG: Klient ID: " + klientId);
+            System.out.println("DEBUG: Procent premii: " + klient.getProcentPremii() + "%");
+            System.out.println("DEBUG: Saldo premii: " + klient.getSaldoPremii() + " zł");
+            System.out.println("DEBUG: Łącznie wydano: " + klient.getTotalWydane() + " zł");
+            System.out.println("DEBUG: Liczba zakupów: " + klient.getLiczbaZakupow());
+
+            model.addAttribute("zakupy", zakupy);
+            model.addAttribute("klient", klient);
+            model.addAttribute("tytul", "Moje Zakupy");
+            model.addAttribute("username", username);
+            return "zakupy/lista-klient";
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD w mojeZakupy: " + e.getMessage());
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupów: " + e.getMessage());
+            return "error";
+        }
+    }
+
+    // GET - szczegóły zakupów klienta (dla admina)
+    @GetMapping("/moje/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String zakupyKlienta(@PathVariable Long id, Model model) {
+        try {
+            // Znajdź klienta
+            Klient klient = klientService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
+
+            // Pobierz zakupy klienta
+            List<Zakup> zakupy = zakupService.findByKlientId(id);
+
+            // Oblicz statystyki
+            BigDecimal sumaCenaBazowa = zakupy.stream()
+                    .map(z -> z.getCenaBazowa() != null ? z.getCenaBazowa() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaWykorzystaneSaldo = zakupy.stream()
+                    .map(z -> z.getWykorzystaneSaldo() != null ? z.getWykorzystaneSaldo() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaNaliczonaPremia = zakupy.stream()
+                    .map(z -> z.getNaliczonaPremia() != null ? z.getNaliczonaPremia() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal sumaCenaZakupu = zakupy.stream()
+                    .map(z -> z.getCenaZakupu() != null ? z.getCenaZakupu() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Dodaj do modelu
+            model.addAttribute("zakupy", zakupy);
+            model.addAttribute("klient", klient);
+            model.addAttribute("sumaCenaBazowa", sumaCenaBazowa);
+            model.addAttribute("sumaWykorzystaneSaldo", sumaWykorzystaneSaldo);
+            model.addAttribute("sumaNaliczonaPremia", sumaNaliczonaPremia);
+            model.addAttribute("sumaCenaZakupu", sumaCenaZakupu);
+            model.addAttribute("tytul", "Zakupy klienta: " + klient.getImie() + " " + klient.getNazwisko());
+
+            return "zakupy/lista-klient";
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD w zakupyKlienta: " + e.getMessage());
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupów: " + e.getMessage());
+            return "error";
+        }
+    }
+
+    // GET - szczegóły konkretnego zakupu (dla admina)
+    @GetMapping("/szczegoly/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String szczegolyZakupu(@PathVariable Long id, Model model) {
+        try {
+            Zakup zakup = zakupService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Zakup nie znaleziony"));
+
+            model.addAttribute("zakup", zakup);
+            model.addAttribute("tytul", "Szczegóły zakupu #" + zakup.getId());
+
+            return "zakupy/szczegoly";
+        } catch (Exception e) {
+            System.err.println("BŁĄD w szczegolyZakupu: " + e.getMessage());
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Błąd podczas ładowania zakupu: " + e.getMessage());
+            return "error";
+        }
+
+    }
+
+    // Pomocnicza metoda do znajdowania zakupów po emailu klienta
+    private List<Zakup> findZakupyByUserEmail(String email) {
+        // Najpierw znajdź klienta po emailu
+        return klientService.findByEmail(email)
+                .map(klient -> zakupService.findByKlientId(klient.getId()))
+                .orElse(List.of());
+    }
+
+    // Usuwanie tylko dla admina - UŻYWAMY TERAZ PROCEDURY Z BAZY
+    @PostMapping("/usun/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String deleteZakup(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        try {
+            zakupService.remove(id);
+            redirectAttributes.addFlashAttribute("successMessage", "Zakup #" + id + " został usunięty.");
+        } catch (Exception e) {
+            System.err.println("Błąd podczas usuwania zakupu: " + e.getMessage());
+            e.printStackTrace();
+            redirectAttributes.addFlashAttribute("errorMessage",
+                    "Błąd podczas usuwania zakupu: " + e.getMessage());
+        }
+        return "redirect:/zakupy";
+    }
+}
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\repository\KlientRepository.java
+------------------------------------------------------------------------------------------------------------------------------------------
+package pl.komis.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import pl.komis.model.Klient;
+
+import java.math.BigDecimal;
+import java.util.Optional;
+
+public interface KlientRepository extends JpaRepository<Klient, Long> {
+
+    Optional<Klient> findByEmail(String email);
+
+    // ZMIANA: aktualny_rabat → procent_premii
+    @Query(value = "SELECT k.procent_premii FROM klient k WHERE k.id = :klientId", nativeQuery = true)
+    Optional<BigDecimal> findProcentPremiiById(@Param("klientId") Long klientId);
+
+    // Nowa metoda: pobierz saldo premii
+    @Query(value = "SELECT k.saldo_premii FROM klient k WHERE k.id = :klientId", nativeQuery = true)
+    Optional<BigDecimal> findSaldoPremiiById(@Param("klientId") Long klientId);
+
+    @Query(value = "SELECT k.liczba_zakupow FROM klient k WHERE k.id = :klientId", nativeQuery = true)
+    Optional<Integer> findLiczbaZakupowById(@Param("klientId") Long klientId);
+
+    // Usuń starą metodę - funkcja oblicz_rabat już nie istnieje
+    // @Query(value = "SELECT pobierz_rabat_dla_klienta(:klientId)", nativeQuery = true)
+    // BigDecimal getRabatDlaKlientaNative(@Param("klientId") Long klientId);
+
+    @Query("SELECT k FROM Klient k WHERE k.id = :id")
+    Optional<Klient> findByIdWithZakupy(@Param("id") Long id);
+
+    // Nowa metoda: wywołaj funkcję PostgreSQL do obliczenia procentu premii
+    @Query(value = "SELECT oblicz_procent_premii(:liczbaZakupow)", nativeQuery = true)
+    BigDecimal obliczProcentPremiiNative(@Param("liczbaZakupow") Long liczbaZakupow);
+    @Query("SELECT COALESCE(SUM(z.naliczonaPremia), 0) FROM Zakup z WHERE z.klient.id = :klientId")
+    BigDecimal sumNaliczonaPremiaByKlientId(@Param("klientId") Long klientId);
+
+    @Query("SELECT COALESCE(SUM(z.wykorzystaneSaldo), 0) FROM Zakup z WHERE z.klient.id = :klientId")
+    BigDecimal sumWykorzystaneSaldoByKlientId(@Param("klientId") Long klientId);
+}
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\service\KlientService.java
+------------------------------------------------------------------------------------------------------------------------------------
 package pl.komis.service;
 
 import lombok.RequiredArgsConstructor;
@@ -788,60 +880,1473 @@ public class KlientService {
                 .map(Klient::getTotalWydane)
                 .orElse(BigDecimal.ZERO);
     }
+    public void naprawSaldo(Long klientId) {
+        Klient klient = findById(klientId)
+                .orElseThrow(() -> new RuntimeException("Klient nie znaleziony"));
+
+        // Oblicz poprawną premię na podstawie historii zakupów
+        BigDecimal sumaPremii = klientRepository.sumNaliczonaPremiaByKlientId(klientId);
+        BigDecimal sumaWykorzystanegoSalda = klientRepository.sumWykorzystaneSaldoByKlientId(klientId);
+
+        // Poprawne saldo = suma premii - suma wykorzystanego salda
+        BigDecimal poprawneSaldo = sumaPremii.subtract(sumaWykorzystanegoSalda);
+
+        klient.setSaldoPremii(poprawneSaldo);
+        save(klient);
+    }
 }
 
 
-�CIE�KA: C:\Users\Rafimaniaak\ProjektJAVA\komis-samochodowy3\src\main\java\pl\komis\repository\ZakupRepository.java
-----------------------------------------------------------------------------------------------------------------------
-package pl.komis.repository;
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\controller\KlientController.java
+------------------------------------------------------------------------------------------------------------------------------------------
+package pl.komis.controller;
 
-import pl.komis.model.Zakup;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import pl.komis.model.Klient;
+import pl.komis.service.KlientService;
 
-import java.time.LocalDate;
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Optional;
+
+@Controller
+@RequestMapping("/klienci")
+@RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
+public class KlientController {
+
+    private final KlientService klientService;
+
+    @GetMapping
+    public String listaKlientow(Model model) {
+        // Pobierz wszystkich klientów (encja Klient)
+        List<Klient> klienci = klientService.findAll();
+
+        // Oblicz statystyki
+        BigDecimal totalSaldo = klienci.stream()
+                .map(k -> k.getSaldoPremii() != null ? k.getSaldoPremii() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalWydane = klienci.stream()
+                .map(k -> k.getTotalWydane() != null ? k.getTotalWydane() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        long klienciZPremia = klienci.stream()
+                .filter(k -> k.getProcentPremii() != null && k.getProcentPremii().compareTo(BigDecimal.ZERO) > 0)
+                .count();
+
+        model.addAttribute("klienci", klienci);
+        model.addAttribute("totalKlienci", klienci.size());
+        model.addAttribute("totalSaldo", totalSaldo);
+        model.addAttribute("totalWydane", totalWydane);
+        model.addAttribute("klienciZPremia", klienciZPremia);
+        model.addAttribute("tytul", "Lista Klientów");
+        return "klienci";
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String szczegolyKlienta(@PathVariable Long id, Model model) {
+        try {
+            Optional<Klient> klientOpt = klientService.findById(id);
+
+            if (klientOpt.isEmpty()) {
+                model.addAttribute("errorMessage", "Klient nie znaleziony");
+                model.addAttribute("tytul", "Błąd");
+                return "error";
+            }
+
+            Klient klient = klientOpt.get();
+            model.addAttribute("klient", klient);
+            model.addAttribute("tytul", "Szczegóły klienta: " + klient.getImie() + " " + klient.getNazwisko());
+
+            return "klienci/szczegoly";
+
+        } catch (Exception e) {
+            System.err.println("BŁĄD w szczegolyKlienta: " + e.getMessage());
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Błąd podczas ładowania klienta: " + e.getMessage());
+            model.addAttribute("tytul", "Błąd");
+            return "error";
+        }
+    }
+}
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\service\KlientPromocjaService.java
+--------------------------------------------------------------------------------------------------------------------------------------------
+package pl.komis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import pl.komis.model.Klient;
+import pl.komis.model.KlientPromocja;
+import pl.komis.model.Promocja;
+import pl.komis.repository.KlientPromocjaRepository;
+import pl.komis.repository.KlientRepository;
+import pl.komis.repository.PromocjaRepository;
+
 import java.util.List;
 
-@Repository
-public interface ZakupRepository extends JpaRepository<Zakup, Long> {
+@Service
+@RequiredArgsConstructor
+public class KlientPromocjaService {
 
-    List<Zakup> findByKlientId(Long klientId);
+    private final KlientPromocjaRepository klientPromocjaRepository;
+    private final KlientRepository klientRepository;
+    private final PromocjaRepository promocjaRepository;
 
-    List<Zakup> findByPracownikId(Long pracownikId);
+    public List<KlientPromocja> findAll() {
+        return klientPromocjaRepository.findAll();
+    }
 
-    List<Zakup> findByDataZakupuBetween(LocalDate startDate, LocalDate endDate);
+    public KlientPromocja findById(Long id) {
+        return klientPromocjaRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Nie znaleziono przypisania promocji o id=" + id));
+    }
 
-    // Dodaj te metody jeśli ich nie ma:
-    boolean existsBySamochodId(Long samochodId);
+    public List<KlientPromocja> findByKlientId(Long klientId) {
+        return klientPromocjaRepository.findByKlientId(klientId);
+    }
 
-    boolean existsBySamochodIdAndKlientId(Long samochodId, Long klientId);
+    public List<KlientPromocja> findByPromocjaId(Long promocjaId) {
+        return klientPromocjaRepository.findByPromocjaId(promocjaId);
+    }
 
-    @Query("SELECT YEAR(z.dataZakupu) as rok, MONTH(z.dataZakupu) as miesiac, " +
-            "COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaSprzedazy " +
-            "FROM Zakup z " +
-            "WHERE YEAR(z.dataZakupu) = :rok " +
-            "GROUP BY YEAR(z.dataZakupu), MONTH(z.dataZakupu) " +
-            "ORDER BY rok, miesiac")
-    List<Object[]> findMonthlyStatistics(@Param("rok") int rok);
+    // ============================
+    //    NAJWAŻNIEJSZE METODY
+    // ============================
 
-    @Query("SELECT YEAR(z.dataZakupu) as rok, " +
-            "COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaSprzedazy " +
-            "FROM Zakup z " +
-            "GROUP BY YEAR(z.dataZakupu) " +
-            "ORDER BY rok")
-    List<Object[]> findYearlyStatistics();
+    public KlientPromocja assignPromotion(Long idKlienta, Long idPromocji) {
 
-    @Query("SELECT z.klient, COUNT(z) as liczbaZakupow, SUM(z.cenaZakupu) as sumaWydatkow " +
-            "FROM Zakup z " +
-            "GROUP BY z.klient " +
-            "ORDER BY sumaWydatkow DESC")
-    List<Object[]> findTopKlienci(@Param("limit") int limit);
+        Klient klient = klientRepository.findById(idKlienta)
+                .orElseThrow(() -> new RuntimeException("Klient nie istnieje: " + idKlienta));
 
-    @Query("SELECT z.pracownik, COUNT(z) as liczbaSprzedazy, SUM(z.cenaZakupu) as sumaSprzedazy " +
-            "FROM Zakup z " +
-            "GROUP BY z.pracownik " +
-            "ORDER BY sumaSprzedazy DESC")
-    List<Object[]> findTopPracownicy(@Param("limit") int limit);
+        Promocja promocja = promocjaRepository.findById(idPromocji)
+                .orElseThrow(() -> new RuntimeException("Promocja nie istnieje: " + idPromocji));
+
+        // tworzymy przypisanie
+        KlientPromocja kp = new KlientPromocja();
+        kp.setKlient(klient);
+        kp.setPromocja(promocja);
+
+        return klientPromocjaRepository.save(kp);
+    }
+
+    public void remove(Long id) {
+        if (!klientPromocjaRepository.existsById(id)) {
+            throw new RuntimeException("Nie znaleziono przypisania do usunięcia: " + id);
+        }
+        klientPromocjaRepository.deleteById(id);
+    }
 }
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\controller\KlientPromocjaController.java
+--------------------------------------------------------------------------------------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import pl.komis.model.KlientPromocja;
+import pl.komis.service.KlientPromocjaService;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/klient-promocje")
+@RequiredArgsConstructor
+public class KlientPromocjaController {
+
+    private final KlientPromocjaService klientPromocjaService;
+
+    @GetMapping
+    public List<KlientPromocja> getAll() {
+        return klientPromocjaService.findAll();
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<KlientPromocja> getById(@PathVariable Long id) {
+        return ResponseEntity.ok(klientPromocjaService.findById(id));
+    }
+
+    @PostMapping("/assign/{idKlienta}/{idPromocji}")
+    public ResponseEntity<KlientPromocja> assign(@PathVariable Long idKlienta,
+                                                 @PathVariable Long idPromocji) {
+        return ResponseEntity.ok(
+                klientPromocjaService.assignPromotion(idKlienta, idPromocji)
+        );
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        klientPromocjaService.remove(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/by-klient/{idKlienta}")
+    public List<KlientPromocja> byKlient(@PathVariable Long idKlienta) {
+        return klientPromocjaService.findByKlientId(idKlienta);
+    }
+
+    @GetMapping("/by-promocja/{idPromocji}")
+    public List<KlientPromocja> byPromocja(@PathVariable Long idPromocji) {
+        return klientPromocjaService.findByPromocjaId(idPromocji);
+    }
+}
+
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\java\pl\komis\controller\PremiaController.java
+------------------------------------------------------------------------------------------------------------------------------------------
+package pl.komis.controller;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import pl.komis.model.Klient;
+import pl.komis.model.User;
+import pl.komis.service.KlientService;
+import pl.komis.service.UserService;
+
+import java.math.BigDecimal;
+
+@Controller
+@RequestMapping("/premia")
+@RequiredArgsConstructor
+public class PremiaController {
+
+    private final UserService userService;
+    private final KlientService klientService;
+
+    @GetMapping("/moje-saldo")
+    public String mojeSaldo(Authentication authentication, Model model) {
+        String username = authentication.getName();
+        User user = userService.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Użytkownik nie znaleziony"));
+
+        Klient klient = user.getKlient();
+        if (klient != null) {
+            model.addAttribute("klient", klient);
+            model.addAttribute("saldo", klient.getSaldoPremii());
+            model.addAttribute("procentPremii", klient.getProcentPremii());
+            model.addAttribute("liczbaZakupow", klient.getLiczbaZakupow());
+            model.addAttribute("totalWydane", klient.getTotalWydane());
+        }
+
+        return "premia/saldo";
+    }
+
+    @GetMapping("/regulamin")
+    public String regulamin() {
+        return "premia/regulamin";
+    }
+}
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\resources\templates\klienci.html
+----------------------------------------------------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${tytul}">Lista Klientów</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            padding-top: 70px;
+            background-color: #f8f9fa;
+        }
+
+        /* Styl dla tabeli aby przyciski były poziomo */
+        .btn-group-horizontal {
+            display: flex;
+            flex-wrap: nowrap;
+        }
+        .btn-group-horizontal .btn {
+            white-space: nowrap;
+        }
+        /* Zmniejsz wysokość wierszy tabeli */
+        .table > tbody > tr > td {
+            padding: 0.5rem;
+            vertical-align: middle;
+        }
+        .table > thead > tr > th {
+            padding: 0.75rem;
+            vertical-align: middle;
+        }
+
+        .navbar-custom {
+            background-color: #343a40 !important;
+        }
+
+        .stat-card {
+            padding: 20px;
+            border-radius: 10px;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .stat-card h6 {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .stat-card h2, .stat-card h4 {
+            margin: 0;
+            font-weight: bold;
+        }
+
+        /* Poprawki dla lepszej czytelności */
+        .badge {
+            text-shadow: none;
+            box-shadow: none;
+            font-weight: 600;
+            padding: 0.4em 0.65em;
+        }
+
+        /* Statystyki - lepsza czytelność */
+        .stat-card .text-primary {
+            color: #0a58ca !important;
+        }
+        .stat-card .text-success {
+            color: #146c43 !important;
+        }
+        .stat-card .text-info {
+            color: #0aa2c0 !important;
+        }
+        .stat-card .text-warning {
+            color: #e0a800 !important;
+        }
+
+        /* Poprawa czytelności tekstu w tabeli */
+        .table td, .table th {
+            text-shadow: none;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Fixed Navigation -->
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top navbar-custom">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">
+            <i class="fas fa-car"></i> Komis Samochodowy
+        </a>
+
+        <!-- Przycisk hamburger menu dla mobilnych -->
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <!-- Menu główne -->
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <!-- Menu dla admina -->
+            <ul class="navbar-nav" sec:authorize="hasRole('ADMIN')">
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/admin}"><i class="fas fa-tachometer-alt"></i> Panel Admina</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/admin/users}"><i class="fas fa-user-friends"></i> Użytkownicy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link active" th:href="@{/klienci}"><i class="fas fa-users"></i> Klienci</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/pracownicy}"><i class="fas fa-id-badge"></i> Pracownicy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/serwis}"><i class="fas fa-tools"></i> Serwis</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/zakupy}"><i class="fas fa-shopping-cart"></i> Wszystkie zakupy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/zakupy/rabaty}"><i class="fas fa-gift"></i> Premie</a>
+                </li>
+            </ul>
+
+            <!-- Menu ogólne (dostępne dla wszystkich) -->
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="/samochody"><i class="fas fa-car"></i> Samochody</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/search"><i class="fas fa-search"></i> Wyszukiwanie</a>
+                </li>
+            </ul>
+
+            <!-- Informacje o użytkowniku i wylogowanie -->
+            <ul class="navbar-nav ms-auto" sec:authorize="isAuthenticated()">
+                <li class="nav-item">
+                    <span class="navbar-text me-3">
+                        <i class="fas fa-user"></i> <span sec:authentication="name"></span>
+                    </span>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/logout}">
+                        <i class="fas fa-sign-out-alt"></i> Wyloguj
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-3">
+    <h1 class="mb-4" th:text="${tytul}">Lista Klientów</h1>
+
+    <!-- Statystyki systemu premii -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stat-card border-primary">
+                <h6><i class="fas fa-users"></i> Łącznie klientów</h6>
+                <h2 class="text-primary" th:text="${totalKlienci}">0</h2>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card border-success">
+                <h6><i class="fas fa-gift"></i> Klienci z premią</h6>
+                <h2 class="text-success" th:text="${klienciZPremia}">0</h2>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card border-info">
+                <h6><i class="fas fa-wallet"></i> Łączne saldo</h6>
+                <h4 class="text-info" th:text="${'💰 ' + #numbers.formatInteger(totalSaldo, 0, 'WHITESPACE') + ' zł'}"></h4>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card border-warning">
+                <h6><i class="fas fa-money-bill-wave"></i> Łącznie wydano</h6>
+                <h4 class="text-warning" th:text="${#numbers.formatInteger(totalWydane, 0, 'WHITESPACE') + ' zł'}"></h4>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-dark">
+                    <tr>
+                        <th>ID</th>
+                        <th>Imię</th>
+                        <th>Nazwisko</th>
+                        <th>Email</th>
+                        <th>Telefon</th>
+                        <th>Liczba zakupów</th>
+                        <th>Procent premii</th>
+                        <th>Saldo premii</th>
+                        <th>Łącznie wydano</th>
+                        <th>Akcje</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="klient : ${klienci}">
+                        <td th:text="${klient.id}"></td>
+                        <td th:text="${klient.imie}"></td>
+                        <td th:text="${klient.nazwisko}"></td>
+                        <td th:text="${klient.email}"></td>
+                        <td th:text="${klient.telefon}"></td>
+                        <td>
+                                <span th:text="${klient.liczbaZakupow}"
+                                      class="badge"
+                                      th:class="${klient.liczbaZakupow > 0} ? 'bg-primary' : 'bg-secondary'">
+                                </span>
+                        </td>
+                        <td>
+                                <span th:text="${klient.procentPremii} + '%'"
+                                      class="badge"
+                                      th:class="${klient.procentPremii > 0} ? 'bg-success' : 'bg-secondary'">
+                                </span>
+                        </td>
+                        <td>
+                                <span th:with="saldoInteger=${klient.saldoPremii.stripTrailingZeros().scale() <= 0}"
+                                      th:text="${saldoInteger} ?
+                                    ${#numbers.formatInteger(klient.saldoPremii, 0, 'WHITESPACE') + ' zł'} :
+                                    ${#numbers.formatDecimal(klient.saldoPremii, 0, 'WHITESPACE', 2, 'COMMA') + ' zł'}"
+                                      class="badge"
+                                      th:class="${klient.saldoPremii > 0} ? 'bg-info' : 'bg-secondary'">
+                                </span>
+                        </td>
+                        <td th:with="wydaneInteger=${klient.totalWydane.stripTrailingZeros().scale() <= 0}"
+                            th:text="${wydaneInteger} ?
+                                ${#numbers.formatInteger(klient.totalWydane, 0, 'WHITESPACE') + ' zł'} :
+                                ${#numbers.formatDecimal(klient.totalWydane, 0, 'WHITESPACE', 2, 'COMMA') + ' zł'}">
+                        </td>
+                        <td>
+                            <!-- Zmienione: przyciski poziomo bez btn-group -->
+                            <div class="d-flex gap-1">
+                                <a th:href="@{/zakupy/moje/{id}(id=${klient.id})}"
+                                   class="btn btn-outline-primary btn-sm" title="Zakupy klienta">
+                                    <i class="fas fa-shopping-cart"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3">
+        <a th:href="@{/admin}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Powrót do panelu
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\resources\templates\zakupy\lista-admin.html
+---------------------------------------------------------------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lista Zakupów - Admin</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            padding-top: 70px;
+            background-color: #f8f9fa;
+        }
+
+        .navbar-custom {
+            background-color: #343a40 !important;
+        }
+
+        .table-responsive {
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .table {
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Fixed Navigation -->
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top navbar-custom">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">
+            <i class="fas fa-car"></i> Komis Samochodowy
+        </a>
+
+        <!-- Przycisk hamburger menu dla mobilnych -->
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <!-- Menu główne -->
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <!-- Menu dla admina -->
+            <ul class="navbar-nav" sec:authorize="hasRole('ADMIN')">
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/admin}"><i class="fas fa-tachometer-alt"></i> Panel Admina</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/admin/users}"><i class="fas fa-user-friends"></i> Użytkownicy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/klienci}"><i class="fas fa-users"></i> Klienci</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/pracownicy}"><i class="fas fa-id-badge"></i> Pracownicy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/serwis}"><i class="fas fa-tools"></i> Serwis</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/zakupy}"><i class="fas fa-shopping-cart"></i> Wszystkie zakupy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/zakupy/rabaty}"><i class="fas fa-gift"></i> Premie</a>
+                </li>
+            </ul>
+
+            <!-- Menu ogólne (dostępne dla wszystkich) -->
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="/samochody"><i class="fas fa-car"></i> Samochody</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/search"><i class="fas fa-search"></i> Wyszukiwanie</a>
+                </li>
+            </ul>
+
+            <!-- Informacje o użytkowniku i wylogowanie -->
+            <ul class="navbar-nav ms-auto" sec:authorize="isAuthenticated()">
+                <li class="nav-item">
+                    <span class="navbar-text me-3">
+                        <i class="fas fa-user"></i> <span sec:authentication="name"></span>
+                    </span>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/logout}">
+                        <i class="fas fa-sign-out-alt"></i> Wyloguj
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-3">
+    <h1 class="mb-4"><i class="fas fa-shopping-cart"></i> Lista Wszystkich Zakupów</h1>
+
+    <div th:if="${zakupy.empty}" class="alert alert-info">
+        <i class="fas fa-info-circle"></i> Brak zakupów w systemie.
+    </div>
+
+    <div th:unless="${zakupy.empty}" class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                    <tr>
+                        <th>Samochód</th>
+                        <th>Klient</th>
+                        <th>Pracownik</th>
+                        <th>Data zakupu</th>
+                        <th>Cena</th>
+                        <th>Akcje</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="z : ${zakupy}">
+                        <td>
+                            <strong th:text="${z.samochod.marka + ' ' + z.samochod.model}"></strong><br>
+                            <small class="text-muted" th:text="'Rok: ' + ${z.samochod.rokProdukcji}"></small>
+                        </td>
+                        <td th:text="${z.klient != null ? z.klient.imie + ' ' + z.klient.nazwisko : 'Brak danych'}"></td>
+                        <td th:text="${z.pracownik != null ? z.pracownik.imie + ' ' + z.pracownik.nazwisko : 'Brak danych'}"></td>
+                        <td th:text="${z.dataZakupu != null ? #temporals.format(z.dataZakupu, 'dd.MM.yyyy') : 'Brak'}"></td>
+                        <td class="text-success fw-bold"
+                            th:text="${z.cenaZakupu != null ? #numbers.formatDecimal(z.cenaZakupu, 0, 2, 'POINT') + ' zł' : 'Brak'}">
+                        </td>
+                        <td>
+                            <form th:action="@{/zakupy/usun/{id}(id=${z.id})}" method="post"
+                                  onsubmit="return confirm('Czy na pewno chcesz usunąć ten zakup?');">
+                                <button type="submit" class="btn btn-danger btn-sm">
+                                    <i class="fas fa-trash"></i> Usuń
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3">
+        <a th:href="@{/admin}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Powrót do panelu
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\resources\templates\zakupy\lista-klient.html
+----------------------------------------------------------------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moje zakupy - Komis Samochodowy</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+    <!-- Custom styles -->
+    <style>
+        body {
+            padding-top: 70px;
+            background-color: #f8f9fa;
+        }
+
+        .stat-card {
+            padding: 20px;
+            border-radius: 10px;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .stat-card h6 {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .stat-card h3 {
+            margin: 0;
+            font-weight: bold;
+        }
+
+        .car-info {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .navbar-custom {
+            background-color: #343a40;
+        }
+    </style>
+</head>
+<body>
+<!-- Simple Navigation -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top navbar-custom">
+    <div class="container">
+        <a class="navbar-brand" href="/">
+            <i class="fas fa-car"></i> Komis Samochodowy
+        </a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="/samochody">
+                <i class="fas fa-list"></i> Samochody
+            </a>
+            <a class="nav-link active" href="/zakupy/moje">
+                <i class="fas fa-shopping-cart"></i> Moje zakupy
+            </a>
+            <a class="nav-link" href="/logout">
+                <i class="fas fa-sign-out-alt"></i> Wyloguj
+            </a>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <!-- Komunikaty -->
+    <div th:if="${successMessage}" class="alert alert-success alert-dismissible fade show" role="alert">
+        <span th:text="${successMessage}"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+
+    <div th:if="${errorMessage}" class="alert alert-danger alert-dismissible fade show" role="alert">
+        <span th:text="${errorMessage}"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+
+    <!-- Panel salda premii -->
+    <div th:if="${klient}" class="card mb-4 shadow">
+        <div class="card-header bg-dark text-white">
+            <h5 class="mb-0"><i class="fas fa-wallet"></i> Moje konto premii</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <h6 class="text-muted">Saldo premii</h6>
+                        <h3 class="text-success">
+                            <span th:if="${klient.saldoPremii != null and klient.saldoPremii.compareTo(0) == 0}">💰 0 zł</span>
+                            <span th:if="${klient.saldoPremii != null and klient.saldoPremii.compareTo(0) != 0}"
+                                  th:text="${'💰 ' + #numbers.formatDecimal(klient.saldoPremii, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            <span th:if="${klient.saldoPremii == null}">💰 0 zł</span>
+                        </h3>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <h6 class="text-muted">Procent premii</h6>
+                        <h3 th:text="${klient.procentPremii != null ? klient.procentPremii + ' %' : '0 %'}"></h3>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <h6 class="text-muted">Liczba zakupów</h6>
+                        <h3 th:text="${klient.liczbaZakupow != null ? klient.liczbaZakupow : 0}"></h3>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <h6 class="text-muted">Łącznie wydano</h6>
+                        <h3 class="text-primary">
+                            <span th:if="${klient.totalWydane != null and klient.totalWydane.compareTo(0) == 0}">0 zł</span>
+                            <span th:if="${klient.totalWydane != null and klient.totalWydane.compareTo(0) != 0}"
+                                  th:text="${#numbers.formatDecimal(klient.totalWydane, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            <span th:if="${klient.totalWydane == null}">0 zł</span>
+                        </h3>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert-info mt-3 p-3 border rounded">
+            <h6><i class="fas fa-info-circle"></i> Jak działa system premii?</h6>
+                <p class="mb-0 small">
+                    1. Za każdy zakup otrzymujesz premię jako procent od wartości zakupu.<br>
+                    2. Premia jest dodawana do Twojego konta w postaci realnych pieniędzy.<br>
+                    3. Zebrane środki możesz wykorzystać przy kolejnych zakupach.<br>
+                    4. Procent premii rośnie z liczbą zakupów: 2 zakupy = 5%, 3 zakupy = 10%, 5+ zakupów = 15%.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lista zakupów -->
+    <div class="card shadow">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="fas fa-history"></i> Historia zakupów</h5>
+        </div>
+        <div class="card-body">
+            <div th:if="${zakupy != null and !zakupy.isEmpty()}">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                        <tr>
+                            <th>Data</th>
+                            <th>Samochód</th>
+                            <th class="text-end">Cena bazowa</th>
+                            <th class="text-end">Wykorzystane saldo</th>
+                            <th class="text-end">Naliczona premia</th>
+                            <th class="text-end">Cena końcowa</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr th:each="zakup : ${zakupy}">
+                            <td th:text="${#temporals.format(zakup.dataZakupu, 'dd.MM.yyyy')}"></td>
+                            <td>
+                                <strong th:text="${zakup.samochod.marka + ' ' + zakup.samochod.model}"></strong><br>
+                                <small class="text-muted" th:text="${zakup.samochod.rokProdukcji + ', ' + zakup.samochod.przebieg + 'km'}"></small>
+                            </td>
+                            <td class="text-end">
+                                <span th:if="${zakup.cenaBazowa != null and zakup.cenaBazowa.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${zakup.cenaBazowa != null and zakup.cenaBazowa.compareTo(0) != 0}"
+                                      th:text="${#numbers.formatDecimal(zakup.cenaBazowa, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                                <span th:if="${zakup.cenaBazowa == null}">0 zł</span>
+                            </td>
+                            <td class="text-end">
+                                    <span th:if="${zakup.wykorzystaneSaldo != null and zakup.wykorzystaneSaldo > 0}"
+                                          class="text-success fw-bold">
+                                        -<span th:text="${#numbers.formatDecimal(zakup.wykorzystaneSaldo, 0, 'COMMA', 2, 'POINT')}"></span> zł
+                                    </span>
+                                <span th:if="${zakup.wykorzystaneSaldo == null or zakup.wykorzystaneSaldo.compareTo(0) == 0}"
+                                      class="text-muted">
+                                        0 zł
+                                    </span>
+                            </td>
+                            <td class="text-end">
+                                    <span th:if="${zakup.naliczonaPremia != null and zakup.naliczonaPremia > 0}"
+                                          class="text-info fw-bold">
+                                        +<span th:text="${#numbers.formatDecimal(zakup.naliczonaPremia, 0, 'COMMA', 2, 'POINT')}"></span> zł
+                                    </span>
+                                <span th:if="${zakup.naliczonaPremia == null or zakup.naliczonaPremia.compareTo(0) == 0}"
+                                      class="text-muted">
+                                        0 zł
+                                    </span>
+                            </td>
+                            <td class="text-end fw-bold">
+                                <span th:if="${zakup.cenaZakupu != null and zakup.cenaZakupu.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${zakup.cenaZakupu != null and zakup.cenaZakupu.compareTo(0) != 0}"
+                                      th:text="${#numbers.formatDecimal(zakup.cenaZakupu, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                                <span th:if="${zakup.cenaZakupu == null}">0 zł</span>
+                            </td>
+                        </tr>
+                        </tbody>
+                        <tfoot class="table-active">
+                        <tr>
+                            <th colspan="2">Razem</th>
+                            <th class="text-end">
+                                <span th:if="${sumaCenaBazowa != null and sumaCenaBazowa.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${sumaCenaBazowa != null and sumaCenaBazowa.compareTo(0) != 0}"
+                                      th:text="${#numbers.formatDecimal(sumaCenaBazowa, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            </th>
+                            <th class="text-end text-success">
+                                <span th:if="${sumaWykorzystaneSaldo != null and sumaWykorzystaneSaldo.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${sumaWykorzystaneSaldo != null and sumaWykorzystaneSaldo.compareTo(0) != 0}"
+                                      th:text="${'-' + #numbers.formatDecimal(sumaWykorzystaneSaldo, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            </th>
+                            <th class="text-end text-info">
+                                <span th:if="${sumaNaliczonaPremia != null and sumaNaliczonaPremia.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${sumaNaliczonaPremia != null and sumaNaliczonaPremia.compareTo(0) != 0}"
+                                      th:text="${'+' + #numbers.formatDecimal(sumaNaliczonaPremia, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            </th>
+                            <th class="text-end fw-bold">
+                                <span th:if="${sumaCenaZakupu != null and sumaCenaZakupu.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${sumaCenaZakupu != null and sumaCenaZakupu.compareTo(0) != 0}"
+                                      th:text="${#numbers.formatDecimal(sumaCenaZakupu, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            </th>
+                        </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <!-- Statystyki -->
+                <div class="row mt-4">
+                    <div class="col-md-3">
+                        <div class="stat-card border-primary">
+                            <h6 class="text-muted">Łącznie wydano</h6>
+                            <h4 class="text-primary">
+                                <span th:if="${sumaCenaZakupu != null and sumaCenaZakupu.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${sumaCenaZakupu != null and sumaCenaZakupu.compareTo(0) != 0}"
+                                      th:text="${#numbers.formatDecimal(sumaCenaZakupu, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            </h4>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card border-success">
+                            <h6 class="text-muted">Wykorzystano salda</h6>
+                            <h4 class="text-success">
+                                <span th:if="${sumaWykorzystaneSaldo != null and sumaWykorzystaneSaldo.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${sumaWykorzystaneSaldo != null and sumaWykorzystaneSaldo.compareTo(0) != 0}"
+                                      th:text="${#numbers.formatDecimal(sumaWykorzystaneSaldo, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            </h4>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card border-info">
+                            <h6 class="text-muted">Zebrane premie</h6>
+                            <h4 class="text-info">
+                                <span th:if="${sumaNaliczonaPremia != null and sumaNaliczonaPremia.compareTo(0) == 0}">0 zł</span>
+                                <span th:if="${sumaNaliczonaPremia != null and sumaNaliczonaPremia.compareTo(0) != 0}"
+                                      th:text="${#numbers.formatDecimal(sumaNaliczonaPremia, 0, 'COMMA', 2, 'POINT') + ' zł'}"></span>
+                            </h4>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card border-secondary">
+                            <h6 class="text-muted">Ilość zakupów</h6>
+                            <h4 th:text="${zakupy.size()}"></h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Brak zakupów -->
+            <div th:if="${zakupy == null or zakupy.isEmpty()}" class="text-center py-5">
+                <i class="fas fa-shopping-cart fa-4x text-muted mb-3"></i>
+                <h4 class="text-muted">Nie masz jeszcze żadnych zakupów</h4>
+                <p class="text-muted mb-4">Zrób pierwszy zakup, aby zacząć korzystać z systemu premii!</p>
+                <a href="/samochody" class="btn btn-primary">
+                    <i class="fas fa-car"></i> Przejdź do listy samochodów
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Przycisk powrotu -->
+    <div class="mt-3">
+        <a href="/samochody" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Wróć do listy samochodów
+        </a>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Auto-close alerts -->
+<script>
+    setTimeout(function() {
+        var alerts = document.querySelectorAll('.alert');
+        alerts.forEach(function(alert) {
+            var bsAlert = new bootstrap.Alert(alert);
+            bsAlert.close();
+        });
+    }, 5000);
+</script>
+</body>
+</html>
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\resources\templates\zakupy\rabaty.html
+----------------------------------------------------------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${tytul}">System premii i rabatów</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            padding-top: 70px;
+            background-color: #f8f9fa;
+        }
+
+        .stat-card {
+            padding: 20px;
+            border-radius: 10px;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .stat-card h6 {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .stat-card h3 {
+            margin: 0;
+            font-weight: bold;
+        }
+
+        .navbar-custom {
+            background-color: #343a40 !important;
+        }
+
+        .table-responsive {
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .card {
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+        }
+
+        /* Poprawka dla lepszego rozłożenia przestrzeni w navbarze */
+        .navbar-nav.ms-auto {
+            display: flex;
+            align-items: center;
+        }
+
+        /* Dodatkowy margin dla prawidłowego odstępu */
+        .navbar-text {
+            margin-right: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Fixed Navigation - POPRAWIONA STRUKTURA -->
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top navbar-custom">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">
+            <i class="fas fa-car"></i> Komis Samochodowy
+        </a>
+
+        <!-- Przycisk hamburger menu dla mobilnych -->
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <!-- Menu główne -->
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <!-- Menu dla admina -->
+            <ul class="navbar-nav" sec:authorize="hasRole('ADMIN')">
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/admin}"><i class="fas fa-tachometer-alt"></i> Panel Admina</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/admin/users}"><i class="fas fa-user-friends"></i> Użytkownicy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/klienci}"><i class="fas fa-users"></i> Klienci</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/pracownicy}"><i class="fas fa-id-badge"></i> Pracownicy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/serwis}"><i class="fas fa-tools"></i> Serwis</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/zakupy}"><i class="fas fa-shopping-cart"></i> Wszystkie zakupy</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/zakupy/rabaty}"><i class="fas fa-gift"></i> Premie</a>
+                </li>
+            </ul>
+
+            <!-- Menu ogólne (dostępne dla wszystkich) -->
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="/samochody"><i class="fas fa-car"></i> Samochody</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/search"><i class="fas fa-search"></i> Wyszukiwanie</a>
+                </li>
+            </ul>
+
+            <!-- Informacje o użytkowniku i wylogowanie -->
+            <ul class="navbar-nav ms-auto" sec:authorize="isAuthenticated()">
+                <li class="nav-item">
+                    <span class="navbar-text me-3">
+                        <i class="fas fa-user"></i> <span sec:authentication="name"></span>
+                    </span>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:href="@{/logout}">
+                        <i class="fas fa-sign-out-alt"></i> Wyloguj
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- Content -->
+<div class="container mt-3">
+    <h1 class="mb-4"><i class="fas fa-gift"></i> <span th:text="${tytul}">System premii i rabatów</span></h1>
+
+    <!-- Statystyki -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="stat-card border-primary">
+                <h6><i class="fas fa-wallet"></i> Łączne saldo premii</h6>
+                <h3 class="text-primary">
+                    <span th:with="saldoInt=${totalSaldo.stripTrailingZeros().scale() <= 0}"
+                          th:text="${'💰 ' + (saldoInt ? #numbers.formatInteger(totalSaldo, 0, 'WHITESPACE') : #numbers.formatDecimal(totalSaldo, 0, 'WHITESPACE', 2, 'COMMA')) + ' zł'}">
+                    </span>
+                </h3>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card border-success">
+                <h6><i class="fas fa-money-bill-wave"></i> Łącznie wydano</h6>
+                <h3 class="text-success">
+                    <span th:with="wydaneInt=${totalWydane.stripTrailingZeros().scale() <= 0}"
+                          th:text="${(wydaneInt ? #numbers.formatInteger(totalWydane, 0, 'WHITESPACE') : #numbers.formatDecimal(totalWydane, 0, 'WHITESPACE', 2, 'COMMA')) + ' zł'}">
+                    </span>
+                </h3>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card border-info">
+                <h6><i class="fas fa-users"></i> Klienci z premią</h6>
+                <h3 th:text="${klienciZPremia} + ' / ' + ${klienci.size()}"></h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabela klientów z premiami -->
+    <div class="card">
+        <div class="card-header bg-dark text-white">
+            <h5 class="mb-0"><i class="fas fa-list"></i> Klienci w systemie premii</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Klient</th>
+                        <th>Email</th>
+                        <th>Liczba zakupów</th>
+                        <th>Procent premii</th>
+                        <th>Saldo premii</th>
+                        <th>Łącznie wydano</th>
+                        <th>Poziom lojalności</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="klient : ${klienci}">
+                        <td th:text="${klient.id}"></td>
+                        <td>
+                            <strong th:text="${klient.imie + ' ' + klient.nazwisko}"></strong>
+                        </td>
+                        <td th:text="${klient.email}"></td>
+                        <td th:text="${klient.liczbaZakupow}"></td>
+                        <td>
+                            <span th:text="${klient.procentPremii} + '%'"
+                                  class="badge"
+                                  th:class="${(klient.procentPremii.compareTo(new java.math.BigDecimal('15')) >= 0) ? 'bg-success' : ((klient.procentPremii.compareTo(new java.math.BigDecimal('10')) >= 0) ? 'bg-primary' : ((klient.procentPremii.compareTo(new java.math.BigDecimal('5')) >= 0) ? 'bg-info' : 'bg-secondary'))}">
+                            </span>
+                        </td>
+                        <td>
+                            <span th:with="saldoInt=${klient.saldoPremii.stripTrailingZeros().scale() <= 0}"
+                                  th:text="${(saldoInt ? #numbers.formatInteger(klient.saldoPremii, 0, 'WHITESPACE') : #numbers.formatDecimal(klient.saldoPremii, 0, 'WHITESPACE', 2, 'COMMA')) + ' zł'}"
+                                  class="badge"
+                                  th:class="${klient.saldoPremii > 0} ? 'bg-warning' : 'bg-secondary'">
+                            </span>
+                        </td>
+                        <td>
+                            <span th:with="wydaneInt=${klient.totalWydane.stripTrailingZeros().scale() <= 0}"
+                                  th:text="${(wydaneInt ? #numbers.formatInteger(klient.totalWydane, 0, 'WHITESPACE') : #numbers.formatDecimal(klient.totalWydane, 0, 'WHITESPACE', 2, 'COMMA')) + ' zł'}">
+                            </span>
+                        </td>
+                        <td>
+                            <span th:if="${klient.liczbaZakupow >= 5}" class="badge bg-success">Złoty</span>
+                            <span th:if="${klient.liczbaZakupow >= 3 and klient.liczbaZakupow < 5}" class="badge bg-primary">Srebrny</span>
+                            <span th:if="${klient.liczbaZakupow >= 2 and klient.liczbaZakupow < 3}" class="badge bg-info">Brązowy</span>
+                            <span th:if="${klient.liczbaZakupow < 2}" class="badge bg-secondary">Nowy</span>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3">
+        <a th:href="@{/admin}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Powrót do panelu
+        </a>
+    </div>
+</div>
+
+<!-- Footer -->
+<footer class="mt-5 py-3 bg-light">
+    <div class="container text-center">
+        <p class="text-muted mb-0">© 2025 Komis Samochodowy</p>
+    </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\resources\templates\zakupy\wykorzystaj-saldo.html
+---------------------------------------------------------------------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security" lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Kup z wykorzystaniem salda premii</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚗 Komis Samochodowy</a>
+        <div class="navbar-nav ms-auto">
+            <div sec:authorize="isAuthenticated()">
+                <span class="navbar-text me-3">Witaj, <span sec:authentication="name"></span></span>
+                <a class="nav-link d-inline" href="#" th:href="@{/logout}">Wyloguj</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="fas fa-wallet me-2"></i>Kup z wykorzystaniem salda premii</h4>
+                </div>
+                <div class="card-body">
+                    <!-- Informacje o kliencie -->
+                    <div class="alert alert-info mb-4">
+                        <h5><i class="fas fa-user me-2"></i>Twoje dane</h5>
+                        <p><strong>Twoje saldo premii:</strong>
+                            <span class="badge bg-success fs-6">
+                               <span th:text="${#numbers.formatDecimal(saldoKlienta, 0, 'COMMA', 2, 'POINT')}"></span> zł
+                           </span>
+                        </p>
+                        <p th:if="${procentPremii > 0}">
+                            <strong>Twój procent premii:</strong>
+                            <span class="badge bg-warning fs-6">
+                                <span th:text="${procentPremii}"></span>%
+                            </span>
+                            <span th:if="${premiaOdZakupu != null}" class="ms-2">
+                                (z tego zakupu otrzymasz dodatkowo:
+                                <strong th:text="${#numbers.formatDecimal(premiaOdZakupu, 0, 'COMMA', 2, 'POINT')}"></span> zł premii)
+                            </span>
+                        </p>
+                    </div>
+
+                    <!-- Informacja o statusie samochodu -->
+                    <div th:if="${samochod.status == 'ZAREZERWOWANY'}" class="alert alert-warning mb-3">
+                        <h5><i class="fas fa-bookmark me-2"></i>Uwaga: Samochód zarezerwowany</h5>
+                        <p>Ten samochód jest obecnie zarezerwowany. Tylko Ty możesz go kupić, ponieważ to Ty go zarezerwowałeś.</p>
+                        <p><strong>Data rezerwacji:</strong> <span th:text="${samochod.dataRezerwacji}"></span></p>
+                    </div>
+
+                    <div th:if="${samochod.status != 'DOSTEPNY' and samochod.status != 'ZAREZERWOWANY'}"
+                         class="alert alert-danger mb-3">
+                        <h5><i class="fas fa-exclamation-triangle me-2"></i>Samochód niedostępny</h5>
+                        <p>Niestety, ten samochód nie jest już dostępny do zakupu. Status:
+                            <span th:text="${samochod.status}"></span></p>
+                        <a th:href="@{/samochody}" class="btn btn-sm btn-outline-primary mt-2">
+                            <i class="fas fa-car me-1"></i> Zobacz dostępne samochody
+                        </a>
+                    </div>
+
+                    <!-- Formularz -->
+                    <form th:action="@{/zakupy/wykorzystaj-saldo}" method="post">
+                        <input type="hidden" name="samochodId" th:value="${samochodId}">
+                        <input type="hidden" name="cenaBazowa" th:value="${cenaBazowa}">
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Cena samochodu:</strong></label>
+                            <div class="form-control-plaintext">
+                                <span class="fs-4 text-success fw-bold">
+                                    <span th:text="${#numbers.formatDecimal(cenaBazowa, 0, 'COMMA', 2, 'POINT')}"></span> zł
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="wykorzystaneSaldo" class="form-label">
+                                <strong>Kwota do wykorzystania z salda:</strong>
+                                <small class="text-muted ms-2">(maks. <span th:text="${#numbers.formatDecimal(maksWykorzystanie, 0, 'COMMA', 2, 'POINT')}"></span> zł)</small>
+                            </label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="wykorzystaneSaldo"
+                                   name="wykorzystaneSaldo"
+                                   min="0"
+                                   th:max="${maksWykorzystanie}"
+                                   step="0.01"
+                                   placeholder="Wpisz kwotę do wykorzystania">
+                            <div class="form-text">
+                                Możesz wykorzystać maksymalnie <span th:text="${#numbers.formatDecimal(maksWykorzystanie, 0, 'COMMA', 2, 'POINT')}"></span> zł z Twojego salda.
+                                Pozostaw puste, jeżeli nie chcesz wykorzystywać salda.
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="pracownikId" class="form-label"><strong>Wybierz pracownika:</strong></label>
+                            <select class="form-select" id="pracownikId" name="pracownikId" required>
+                                <option value="">-- Wybierz pracownika --</option>
+                                <!-- Dynamiczna lista pracowników z bazy -->
+                                <option th:each="pracownik : ${pracownicy}"
+                                        th:value="${pracownik.id}"
+                                        th:text="${pracownik.imie + ' ' + pracownik.nazwisko + ' (' + pracownik.stanowisko + ')'}">
+                                </option>
+                            </select>
+                        </div>
+
+                        <!-- Podsumowanie -->
+                        <div class="alert alert-warning">
+                            <h6><i class="fas fa-calculator me-2"></i>Podsumowanie:</h6>
+                            <p id="podsumowanie">
+                                Cena końcowa: <span class="fw-bold">
+                                    <span th:text="${#numbers.formatDecimal(cenaBazowa, 0, 'COMMA', 2, 'POINT')}"></span> zł
+                                </span>
+                            </p>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-success btn-lg">
+                                <i class="fas fa-check-circle me-2"></i>Potwierdź zakup
+                            </button>
+                            <a th:href="@{/samochody/szczegoly(id=${samochodId})}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left me-2"></i>Powrót do szczegółów samochodu
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Skrypt do dynamicznego obliczania ceny końcowej
+    document.getElementById('wykorzystaneSaldo').addEventListener('input', function() {
+        const cenaBazowa = [[${cenaBazowa}]];
+        const wykorzystaneSaldo = parseFloat(this.value) || 0;
+        const cenaKoncowa = cenaBazowa - wykorzystaneSaldo;
+
+        document.getElementById('podsumowanie').innerHTML = `
+            <strong>Cena końcowa:</strong> <span class="fw-bold">${cenaKoncowa.toFixed(2)} zł</span><br>
+            <small class="text-muted">
+                (Cena bazowa: ${cenaBazowa.toFixed(2)} zł -
+                Wykorzystane saldo: ${wykorzystaneSaldo.toFixed(2)} zł)
+            </small>
+        `;
+    });
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+�CIE�KA: C:\Users\RAFIMANIAAK\Downloads\komis-samochodowy (1)\komis-samochodowy\src\main\resources\templates\premia\saldo.html
+---------------------------------------------------------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Moje saldo premii</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>">
+</head>
+<body>
+<h1>Moje saldo premii</h1>
+
+<div th:if="${klient}">
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Stan konta premii</h5>
+            <p><strong>Saldo dostępne:</strong> <span th:text="${saldo}">0.00</span> zł</p>
+            <p><strong>Procent premii na następny zakup:</strong> <span th:text="${procentPremii}">0</span>%</p>
+            <p><strong>Liczba dokonanych zakupów:</strong> <span th:text="${liczbaZakupow}">0</span></p>
+            <p><strong>Łącznie wydano:</strong> <span th:text="${totalWydane}">0.00</span> zł</p>
+
+            <div class="alert alert-info mt-3">
+                <h6>Jak działają premie?</h6>
+                <ul>
+                    <li>Po 2 zakupach: 5% premii</li>
+                    <li>Po 3 zakupach: 10% premii</li>
+                    <li>Po 5 zakupach: 15% premii</li>
+                    <li>Premia jest naliczana od ceny bazowej samochodu</li>
+                    <li>Saldo możesz wykorzystać przy kolejnych zakupach</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:unless="${klient}" class="alert alert-warning">
+    Nie jesteś zarejestrowany jako klient. Skontaktuj się z administracją.
+</div>
+
+<a th:href="@{/}" class="btn btn-secondary">Powrót</a>
+</body>
+</html>
+
+
+�CIE�KA: src/main/resources/import.sql
+--------------------------------
+[POMINI�TO: NIEJAWNY FORMAT]

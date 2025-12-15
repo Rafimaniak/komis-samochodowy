@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import pl.komis.model.*;
 import pl.komis.service.*;
-import pl.komis.service.KlientService;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -25,9 +24,8 @@ public class ZakupController {
     private final ZakupService zakupService;
     private final UserService userService;
     private final KlientService klientService;
-    private final SamochodService samochodService; // Dodaj to!
-    private final PracownikService pracownikService; // Dodaj to!
-
+    private final SamochodService samochodService;
+    private final PracownikService pracownikService;
 
     @GetMapping("/rabaty")
     @PreAuthorize("hasRole('ADMIN')")
@@ -66,7 +64,6 @@ public class ZakupController {
         return "zakupy/lista-admin";
     }
 
-    // W metodzie wykorzystajSaldoForm w ZakupController.java już masz:
     @GetMapping("/wykorzystaj-saldo")
     @PreAuthorize("isAuthenticated()")
     public String wykorzystajSaldoForm(@RequestParam Long samochodId,
@@ -129,7 +126,7 @@ public class ZakupController {
         return "zakupy/wykorzystaj-saldo";
     }
 
-    // POST-wykonanie zakupu z saldem
+    // POST-wykonanie zakupu z saldem - UŻYWAMY TERAZ PROCEDURY Z BAZY
     @PostMapping("/wykorzystaj-saldo")
     @PreAuthorize("isAuthenticated()")
     public String wykonajZakupZSaldem(@RequestParam Long samochodId,
@@ -181,38 +178,14 @@ public class ZakupController {
                 faktycznieWykorzystaneSaldo = wykorzystaneSaldo.min(cenaBazowa);
             }
 
-            // Oblicz naliczoną premię (tylko do wyświetlenia w komunikacie)
-            BigDecimal naliczonaPremia = BigDecimal.ZERO;
-            if (klient.getProcentPremii() != null &&
-                    klient.getProcentPremii().compareTo(BigDecimal.ZERO) > 0) {
-                naliczonaPremia = cenaBazowa
-                        .multiply(klient.getProcentPremii())
-                        .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-            }
-
-            // Oblicz końcową cenę zakupu
-            BigDecimal cenaZakupu = cenaBazowa.subtract(faktycznieWykorzystaneSaldo);
-
-            // Utwórz zakup
-            Zakup zakup = new Zakup();
-            zakup.setSamochod(samochod);
-            zakup.setKlient(klient);
-            zakup.setPracownik(pracownik);
-            zakup.setCenaBazowa(cenaBazowa);
-            zakup.setWykorzystaneSaldo(faktycznieWykorzystaneSaldo);
-            zakup.setNaliczonaPremia(naliczonaPremia); // Trigger może to nadpisać
-            zakup.setCenaZakupu(cenaZakupu); // Trigger może to nadpisać
-            zakup.setDataZakupu(LocalDate.from(LocalDateTime.now()));
-            zakup.setZastosowanyRabat(klient.getProcentPremii()); // Trigger może to nadpisać
-
-            // Zapisz zakup - TRIGGER automatycznie zaktualizuje klienta!
-            zakupService.save(zakup);
-
-            // ZMIANA STATUSU SAMOCHODU NA SPRZEDANY
-            samochod.setStatus("SPRZEDANY");
-            samochod.setZarezerwowanyPrzez(null); // Wyczyść rezerwację po zakupie
-            samochod.setDataRezerwacji(null);
-            samochodService.save(samochod);
+            // UŻYCIE PROCEDURY Z BAZY DANYCH zamiast ręcznego tworzenia Zakupu
+            Long zakupId = zakupService.createZakupZSaldem(
+                    samochodId,
+                    user.getId(),
+                    pracownikId,
+                    cenaBazowa,
+                    faktycznieWykorzystaneSaldo
+            );
 
             // Pobierz zaktualizowane dane klienta po akcji triggera
             Klient zaktualizowanyKlient = klientService.findById(klient.getId())
@@ -225,15 +198,14 @@ public class ZakupController {
                 message = String.format(
                         "Samochód kupiony z wykorzystaniem salda!<br>" +
                                 "Wykorzystano saldo: <strong>%.2f zł</strong><br>" +
-                                "Na Twoje saldo dodano: <strong>%.2f zł</strong> premii<br>" +
                                 "Nowe saldo: <strong>%.2f zł</strong>",
-                        zaoszczedzone, naliczonaPremia, zaktualizowanyKlient.getSaldoPremii()
+                        zaoszczedzone, zaktualizowanyKlient.getSaldoPremii()
                 );
             } else {
                 message = String.format(
                         "Samochód kupiony pomyślnie!<br>" +
-                                "Na Twoje saldo dodano: <strong>%.2f zł</strong> premii",
-                        naliczonaPremia
+                                "Twoje nowe saldo premii: <strong>%.2f zł</strong>",
+                        zaktualizowanyKlient.getSaldoPremii()
                 );
             }
 
@@ -252,7 +224,7 @@ public class ZakupController {
         }
     }
 
-    // Dla użytkownika: tylko jego zakupy - ZMIENIONE: teraz przekazujemy obiekt Klient
+    // Dla użytkownika: tylko jego zakupy
     @GetMapping("/moje")
     @PreAuthorize("isAuthenticated()")
     public String mojeZakupy(Authentication authentication, Model model) {
@@ -314,6 +286,7 @@ public class ZakupController {
             return "error";
         }
     }
+
     // GET - szczegóły zakupów klienta (dla admina)
     @GetMapping("/moje/{id}")
     @PreAuthorize("hasRole('ADMIN')")
@@ -383,7 +356,6 @@ public class ZakupController {
 
     }
 
-
     // Pomocnicza metoda do znajdowania zakupów po emailu klienta
     private List<Zakup> findZakupyByUserEmail(String email) {
         // Najpierw znajdź klienta po emailu
@@ -392,12 +364,19 @@ public class ZakupController {
                 .orElse(List.of());
     }
 
-
-    // Usuwanie tylko dla admina
+    // Usuwanie tylko dla admina - UŻYWAMY TERAZ PROCEDURY Z BAZY
     @PostMapping("/usun/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public String deleteZakup(@PathVariable Long id) {
-        zakupService.remove(id);
+    public String deleteZakup(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        try {
+            zakupService.remove(id);
+            redirectAttributes.addFlashAttribute("successMessage", "Zakup #" + id + " został usunięty.");
+        } catch (Exception e) {
+            System.err.println("Błąd podczas usuwania zakupu: " + e.getMessage());
+            e.printStackTrace();
+            redirectAttributes.addFlashAttribute("errorMessage",
+                    "Błąd podczas usuwania zakupu: " + e.getMessage());
+        }
         return "redirect:/zakupy";
     }
 }
